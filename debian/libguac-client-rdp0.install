@@ -1,0 +1,2 @@
+usr/lib/*/libguac-client-rdp.so.*
+usr/lib/*/freerdp/*.so

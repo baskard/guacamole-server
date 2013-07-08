@@ -9,5 +9,20 @@
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
+# Multiarch support
+DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+
+build:
+	dh --with autoreconf build --before configure
+	dh_auto_configure -- --libdir=\$${prefix}/lib/$(DEB_HOST_MULTIARCH)
+	dh --with autoreconf build --after configure
+
 %:
 	dh --with autoreconf $@ 
+
+# Remove .la files (cannot simply exclude using dh_install, as dh_install
+# is not used for single-package builds)
+override_dh_install:
+	find . -name "*.la" -delete
+	dh_install
+
