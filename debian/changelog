@@ -1,0 +1,6 @@
+guacamole-server (0.8.0-1) UNRELEASED; urgency=low
+
+  * Initial release.
+
+ -- Michael Jumper <mike.jumper@guac-dev.org>  Mon, 8 Jul 2013 15:29:00 -0700
+
