@@ -37,6 +37,16 @@ export HOME=`sh -c "echo ~$USER"`
 # Depend on lsb-base (>= 3.0-6) to ensure that this file is present.
 . /lib/lsb/init-functions
 
+# Add listen port, if given
+if [ -n "$LISTEN_PORT" ]; then
+    DAEMON_ARGS="$DAEMON_ARGS -l $LISTEN_PORT"
+fi
+
+# Add listen address, if given
+if [ -n "$LISTEN_ADDRESS" ]; then
+    DAEMON_ARGS="$DAEMON_ARGS -b $LISTEN_ADDRESS"
+fi
+
 #
 # Function that starts the daemon/service
 #
