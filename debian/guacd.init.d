@@ -30,9 +30,6 @@ export HOME=`sh -c "echo ~$USER"`
 # Read configuration variable file if it is present
 [ -r /etc/default/$NAME ] && . /etc/default/$NAME
 
-# Load the VERBOSE setting and other rcS variables
-. /lib/init/vars.sh
-
 # Define LSB log_* functions.
 # Depend on lsb-base (>= 3.0-6) to ensure that this file is present.
 . /lib/lsb/init-functions
@@ -107,19 +104,19 @@ do_stop()
 
 case "$1" in
   start)
-    [ "$VERBOSE" != no ] && log_daemon_msg "Starting $DESC" "$NAME"
+    log_daemon_msg "Starting $DESC" "$NAME"
     do_start
     case "$?" in
-        0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
-        2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+        0|1) log_end_msg 0 ;;
+        2)   log_end_msg 1 ;;
     esac
     ;;
   stop)
-    [ "$VERBOSE" != no ] && log_daemon_msg "Stopping $DESC" "$NAME"
+    log_daemon_msg "Stopping $DESC" "$NAME"
     do_stop
     case "$?" in
-        0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
-        2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+        0|1) log_end_msg 0 ;;
+        2)   log_end_msg 1 ;;
     esac
     ;;
   status)
@@ -142,7 +139,7 @@ case "$1" in
         esac
         ;;
       *)
-          # Failed to stop
+        # Failed to stop
         log_end_msg 1
         ;;
     esac
