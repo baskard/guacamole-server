@@ -12,13 +12,12 @@
 # Multiarch support
 DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
 
-build:
-	dh --with autoreconf build --before configure
-	dh_auto_configure -- --libdir=\$${prefix}/lib/$(DEB_HOST_MULTIARCH)
-	dh --with autoreconf build --after configure
-
 %:
 	dh --with autoreconf $@ 
+
+# Set lib directory properly for multiarch
+override_dh_auto_configure:
+	dh_auto_configure -- --libdir=\$${prefix}/lib/$(DEB_HOST_MULTIARCH)
 
 # Remove .la files (cannot simply exclude using dh_install, as dh_install
 # is not used for single-package builds)
