@@ -55,6 +55,11 @@
 #include <syslog.h>
 #include <libgen.h>
 
+#ifdef ENABLE_SSL
+#include <openssl/ssl.h>
+#include "socket-ssl.h"
+#endif
+
 #include <guacamole/client.h>
 #include <guacamole/error.h>
 #include <guacamole/instruction.h>
@@ -67,7 +72,7 @@
 #define GUACD_DEV_NULL "/dev/null"
 #define GUACD_ROOT     "/"
 
-void guacd_handle_connection(int fd) {
+void guacd_handle_connection(guac_socket* socket) {
 
     guac_client* client;
     guac_client_plugin* plugin;
@@ -77,9 +82,6 @@ void guacd_handle_connection(int fd) {
     guac_instruction* video;
     guac_instruction* connect;
     int init_result;
-
-    /* Open guac_socket */
-    guac_socket* socket = guac_socket_open(fd);
 
     /* Get protocol from select instruction */
     select = guac_instruction_expect(
@@ -362,11 +364,18 @@ int main(int argc, char* argv[]) {
     int opt;
     int foreground = 0;
 
+#ifdef ENABLE_SSL
+    /* SSL */
+    char* cert_file = NULL;
+    char* key_file = NULL;
+    SSL_CTX* ssl_context = NULL;
+#endif
+
     /* General */
     int retval;
 
     /* Parse arguments */
-    while ((opt = getopt(argc, argv, "l:b:p:f")) != -1) {
+    while ((opt = getopt(argc, argv, "l:b:p:C:K:f")) != -1) {
         if (opt == 'l') {
             listen_port = strdup(optarg);
         }
@@ -379,12 +388,34 @@ int main(int argc, char* argv[]) {
         else if (opt == 'p') {
             pidfile = strdup(optarg);
         }
+#ifdef ENABLE_SSL
+        else if (opt == 'C') {
+            cert_file = strdup(optarg);
+        }
+        else if (opt == 'K') {
+            key_file = strdup(optarg);
+        }
+#else
+        else if (opt == 'C' || opt == 'K') {
+            fprintf(stderr,
+                    "This guacd does not have SSL/TLS support compiled in.\n\n"
+
+                    "If you wish to enable support for the -%c option, please install libssl and\n"
+                    "recompile guacd.\n",
+                    opt);
+            exit(EXIT_FAILURE);
+        }
+#endif
         else {
 
             fprintf(stderr, "USAGE: %s"
                     " [-l LISTENPORT]"
                     " [-b LISTENADDRESS]"
                     " [-p PIDFILE]"
+#ifdef ENABLE_SSL
+                    " [-C CERTIFICATE_FILE]"
+                    " [-K PEM_FILE]"
+#endif
                     " [-f]\n", argv[0]);
 
             exit(EXIT_FAILURE);
@@ -467,6 +498,41 @@ int main(int argc, char* argv[]) {
         guacd_log_error("Unable to bind socket to any addresses.");
         exit(EXIT_FAILURE);
     }
+
+#ifdef ENABLE_SSL
+    /* Init SSL if enabled */
+    if (key_file != NULL || cert_file != NULL) {
+
+        /* Init SSL */
+        guacd_log_info("Communication will require SSL/TLS.");
+        SSL_library_init();
+        SSL_load_error_strings();
+        ssl_context = SSL_CTX_new(SSLv23_server_method());
+
+        /* Load key */
+        if (key_file != NULL) {
+            guacd_log_info("Using PEM keyfile %s", key_file);
+            if (!SSL_CTX_use_PrivateKey_file(ssl_context, key_file, SSL_FILETYPE_PEM)) {
+                guacd_log_error("Unable to load keyfile.");
+                exit(EXIT_FAILURE);
+            }
+        }
+        else
+            guacd_log_info("No PEM keyfile given - SSL/TLS may not work.");
+
+        /* Load cert file if specified */
+        if (cert_file != NULL) {
+            guacd_log_info("Using certificate file %s", cert_file);
+            if (!SSL_CTX_use_certificate_file(ssl_context, cert_file, SSL_FILETYPE_PEM)) {
+                guacd_log_error("Unable to load certificate.");
+                exit(EXIT_FAILURE);
+            }
+        }
+        else
+            guacd_log_info("No certificate file given - SSL/TLS may not work.");
+
+    }
+#endif
 
     /* Daemonize if requested */
     if (!foreground) {
@@ -554,7 +620,27 @@ int main(int argc, char* argv[]) {
 
         /* If child, start client, and exit when finished */
         else if (child_pid == 0) {
-            guacd_handle_connection(connected_socket_fd);
+
+            guac_socket* socket;
+
+#ifdef ENABLE_SSL
+
+            /* If SSL chosen, use it */
+            if (ssl_context != NULL) {
+                socket = guac_socket_open_secure(ssl_context, connected_socket_fd);
+                if (socket == NULL) {
+                    guacd_log_guac_error("Error opening secure connection");
+                    return 0;
+                }
+            }
+            else
+                socket = guac_socket_open(connected_socket_fd);
+#else
+            /* Open guac_socket */
+            socket = guac_socket_open(connected_socket_fd);
+#endif
+
+            guacd_handle_connection(socket);
             close(connected_socket_fd);
             return 0;
         }

@@ -47,24 +47,45 @@
 #include "client.h"
 #include "convert.h"
 
+#ifdef ENABLE_PULSE
+#include "pulse.h"
+#endif
+
 int vnc_guac_client_handle_messages(guac_client* client) {
 
-    int wait_result;
     rfbClient* rfb_client = ((vnc_guac_client_data*) client->data)->rfb_client;
 
-    wait_result = WaitForMessage(rfb_client, 1000000);
-    if (wait_result < 0) {
-        guac_client_log_error(client, "Error waiting for VNC server message\n");
-        return 1;
-    }
+    /* Initially wait for messages */
+    int wait_result = WaitForMessage(rfb_client, 1000000);
+    guac_timestamp frame_start = guac_timestamp_current();
+    while (wait_result > 0) {
 
-    if (wait_result > 0) {
+        guac_timestamp frame_end;
+        int frame_remaining;
 
+        /* Handle any message received */
         if (!HandleRFBServerMessage(rfb_client)) {
             guac_client_log_error(client, "Error handling VNC server message\n");
             return 1;
         }
 
+        /* Calculate time remaining in frame */
+        frame_end = guac_timestamp_current();
+        frame_remaining = frame_start + GUAC_VNC_FRAME_DURATION - frame_end;
+
+        /* Wait again if frame remaining */
+        if (frame_remaining > 0)
+            wait_result = WaitForMessage(rfb_client,
+                    GUAC_VNC_FRAME_TIMEOUT*1000);
+        else
+            break;
+
+    }
+
+    /* If an error occurs, log it and fail */
+    if (wait_result < 0) {
+        guac_client_log_error(client, "Error waiting for VNC server message\n");
+        return 1;
     }
 
     return 0;
@@ -117,6 +138,12 @@ int vnc_guac_client_free_handler(guac_client* client) {
 
     vnc_guac_client_data* guac_client_data = (vnc_guac_client_data*) client->data;
     rfbClient* rfb_client = guac_client_data->rfb_client;
+
+#ifdef ENABLE_PULSE
+    /* If audio enabled, stop streaming */
+    if (guac_client_data->audio_enabled)
+        guac_pa_stop_stream(client);
+#endif
 
     /* Free encodings string, if used */
     if (guac_client_data->encodings != NULL)

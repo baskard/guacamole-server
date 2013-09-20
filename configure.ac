@@ -36,7 +36,7 @@
 
 
 AC_PREREQ([2.61])
-AC_INIT([guacamole-server], [0.8.2])
+AC_INIT([guacamole-server], [0.8.3])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 
 LT_PREREQ([2.2])
@@ -85,10 +85,15 @@ AC_SUBST(PTHREAD_LIBS)
 AC_SUBST(CUNIT_LIBS)
 
 # Library functions
-AC_FUNC_MALLOC
-AC_FUNC_REALLOC
-AC_CHECK_FUNCS([clock_gettime gettimeofday memmove memset select strdup png_get_io_ptr \
-                cairo_format_stride_for_width nanosleep])
+AC_CHECK_FUNCS([clock_gettime gettimeofday memmove memset select strdup nanosleep])
+
+AC_CHECK_DECL([png_get_io_ptr],
+	[AC_DEFINE([HAVE_PNG_GET_IO_PTR])],,
+	[#include <png.h>])
+
+AC_CHECK_DECL([cairo_format_stride_for_width],
+	[AC_DEFINE([HAVE_CAIRO_FORMAT_STRIDE_FOR_WIDTH])],,
+	[#include <cairo/cairo.h>])
 
 # Typedefs
 AC_TYPE_SIZE_T
@@ -105,6 +110,31 @@ AC_ARG_WITH(init_dir,
             ],init_dir=$withval)
 AM_CONDITIONAL([ENABLE_INIT], [test "x${init_dir}" != "x"])
 AC_SUBST(init_dir)
+
+#
+# libssl
+#
+
+have_ssl=yes
+SSL_LIBS=
+
+AC_CHECK_HEADER(openssl/ssl.h,, [have_ssl=no])
+AC_CHECK_LIB([ssl], [SSL_CTX_new], [SSL_LIBS="$SSL_LIBS -lssl"], [have_ssl=no])
+AM_CONDITIONAL([ENABLE_SSL], [test "x${have_ssl}" = "xyes"])
+
+if test "x${have_ssl}" = "xno"
+then
+    AC_MSG_WARN([
+  --------------------------------------------
+   Unable to find libssl.
+   guacd will not support SSL connections.
+  --------------------------------------------])
+else
+    AC_DEFINE([ENABLE_SSL])
+fi
+
+AC_SUBST(SSL_LIBS)
+
 
 #
 # Ogg Vorbis
@@ -131,6 +161,29 @@ else
 fi
 
 AC_SUBST(VORBIS_LIBS)
+
+#
+# PulseAudio
+#
+
+have_pulse=yes
+PULSE_LIBS=
+
+AC_CHECK_LIB([pulse], [pa_context_new], [PULSE_LIBS="$PULSE_LIBS -lpulse"], [have_pulse=no])
+AM_CONDITIONAL([ENABLE_PULSE], [test "x${have_pulse}" = "xyes"])
+
+if test "x${have_pulse}" = "xno"
+then
+    AC_MSG_WARN([
+  --------------------------------------------
+   Unable to find libpulse
+   Sound support for VNC will be disabled
+  --------------------------------------------])
+else
+    AC_DEFINE([ENABLE_PULSE])
+fi
+
+AC_SUBST(PULSE_LIBS)
 
 #
 # PANGO
@@ -162,7 +215,7 @@ then
     have_vnc_repeater=yes
     AC_CHECK_MEMBERS([rfbClient.destHost, rfbClient.destPort],
                      [], [have_vnc_repeater=no],
-                     [[#include <rfb/rfbclient.h>]])
+                      [[#include <rfb/rfbclient.h>]])
 
     if test "x${have_vnc_repeater}" = "xno"
     then
@@ -181,15 +234,261 @@ fi
 # FreeRDP
 #
 
+have_winpr=yes
 have_freerdp=yes
+legacy_freerdp_extensions=no
+rdpsettings_interface=unknown
+freerdp_interface=unknown
+event_interface=unknown
 RDP_LIBS=
 
-AC_CHECK_LIB([freerdp-cache],    [glyph_cache_register_callbacks], [RDP_LIBS="$RDP_LIBS -lfreerdp-cache"], [have_freerdp=no])
-AC_CHECK_LIB([freerdp-core],     [freerdp_new], [RDP_LIBS="$RDP_LIBS -lfreerdp-core"], [have_freerdp=no])
-AC_CHECK_LIB([freerdp-channels], [freerdp_channels_new], [RDP_LIBS="$RDP_LIBS -lfreerdp-channels"], [have_freerdp=no])
-AC_CHECK_LIB([freerdp-utils],    [xzalloc], [RDP_LIBS="$RDP_LIBS -lfreerdp-utils"], [have_freerdp=no])
-AC_CHECK_LIB([freerdp-codec],    [freerdp_image_convert], [RDP_LIBS="$RDP_LIBS -lfreerdp-codec"], [have_freerdp=no])
-AM_CONDITIONAL([ENABLE_RDP], [test "x${have_freerdp}" = "xyes"])
+# libfreerdp-cache
+AC_CHECK_LIB([freerdp-cache], [glyph_cache_register_callbacks],
+             [RDP_LIBS="$RDP_LIBS -lfreerdp-cache"],
+             [AC_MSG_WARN([
+  --------------------------------------------
+   Unable to find libfreerdp-cache
+   RDP will be disabled.
+  --------------------------------------------])
+              have_freerdp=no])
+
+# libfreerdp-core
+AC_CHECK_LIB([freerdp-core], [freerdp_new],
+             [RDP_LIBS="$RDP_LIBS -lfreerdp-core"],
+             [AC_MSG_WARN([
+  --------------------------------------------
+   Unable to find libfreerdp-core
+   RDP will be disabled.
+  --------------------------------------------])
+              have_freerdp=no])
+
+# libfreerdp-channels (1.0) / libfreerdp-client (1.1+)
+AC_CHECK_LIB([freerdp-client], [freerdp_channels_new],
+             [RDP_LIBS="$RDP_LIBS -lfreerdp-client"],
+             [AC_CHECK_LIB([freerdp-channels], [freerdp_channels_new],
+                           [RDP_LIBS="$RDP_LIBS -lfreerdp-channels"
+                            legacy_freerdp_extensions=yes],
+                           [AC_MSG_WARN([
+  --------------------------------------------
+   Unable to find libfreerdp-client / libfreerdp-channels
+   RDP will be disabled.
+  --------------------------------------------])
+                            have_freerdp=no])])
+
+# libfreerdp-utils
+AC_CHECK_LIB([freerdp-utils], [svc_plugin_init],
+             [RDP_LIBS="$RDP_LIBS -lfreerdp-utils"],
+             [AC_MSG_WARN([
+  --------------------------------------------
+   Unable to find libfreerdp-utils
+   RDP will be disabled.
+  --------------------------------------------])
+              have_freerdp=no])
+
+# libfreerdp-codec
+AC_CHECK_LIB([freerdp-codec], [freerdp_image_convert],
+             [RDP_LIBS="$RDP_LIBS -lfreerdp-codec"],
+             [AC_MSG_WARN([
+  --------------------------------------------
+   Unable to find libfreerdp-codec
+   RDP will be disabled.
+  --------------------------------------------])
+              have_freerdp=no])
+
+# Check for interval polling in plugins
+AC_CHECK_MEMBERS([rdpSvcPlugin.interval_ms],,,
+                 [[#include <freerdp/utils/svc_plugin.h>]])
+
+# Keyboard layout header
+AC_CHECK_HEADERS([freerdp/locale/keyboard.h],,
+                  AC_CHECK_HEADERS([freerdp/kbd/layouts.h],,
+                                   [AC_MSG_WARN([
+  --------------------------------------------
+   Unable to find keyboard layout headers
+   RDP will be disabled.
+  --------------------------------------------])
+                                    have_freerdp=no]))
+
+# New headers defining addins
+AC_CHECK_HEADERS([freerdp/addin.h freerdp/client/channels.h])
+
+# Header defining cliprdr
+AC_CHECK_HEADERS([freerdp/client/cliprdr.h],,
+                  AC_CHECK_HEADERS([freerdp/plugins/cliprdr.h],,
+                                   [AC_MSG_WARN([
+  --------------------------------------------
+   Unable to find cliprdr headers
+   RDP will be disabled.
+  --------------------------------------------])
+                                    have_freerdp=no],
+                                   [#include <freerdp/types.h>]),
+                 [#include <winpr/wtypes.h>
+                  #include <winpr/collections.h>])
+
+AC_CHECK_DECL([freerdp_register_addin_provider],
+	[AC_DEFINE([HAVE_FREERDP_REGISTER_ADDIN_PROVIDER])],,
+	[#include <freerdp/addin.h>])
+
+#
+# FreeRDP: WinPR
+#
+
+# Check for stream support via WinPR
+AC_CHECK_HEADER(winpr/stream.h,,
+                [have_winpr=no,
+                 AC_CHECK_DECL([stream_write_uint8],,
+                              [AC_MSG_WARN([
+  --------------------------------------------
+   Unable to find stream support
+   RDP will be disabled.
+  --------------------------------------------])
+                               have_freerdp=no],
+                              [#include <freerdp/utils/stream.h>])])
+
+# Check for types in WinPR
+AC_CHECK_HEADER(winpr/wtypes.h,,
+                [have_winpr=no,
+                 AC_CHECK_HEADER(freerdp/types.h,,
+                                 [AC_MSG_WARN([
+  --------------------------------------------
+   Unable to find type definitions
+   RDP will be disabled.
+  --------------------------------------------])
+                                  have_freerdp=no])])
+
+if test "x${have_winpr}" = "xyes"
+then
+    AC_DEFINE([ENABLE_WINPR])
+fi
+
+#
+# FreeRDP: freerdp 
+#
+
+# Check for current (as of 1.1) freerdp interface
+AC_CHECK_MEMBERS([freerdp.ContextSize],
+                 [freerdp_interface=stable],,
+                 [[#include <freerdp/freerdp.h>]])
+
+# If not current, check for legacy interface
+if test "x${freerdp_interface}" = "xunknown"
+then
+    AC_CHECK_MEMBERS([freerdp.context_size],
+                     [freerdp_interface=legacy],,
+                     [[#include <freerdp/freerdp.h>]])
+fi
+
+# Set defines based on interface type, warn if unknown
+if test "x${freerdp_interface}" = "xlegacy"; then
+    AC_DEFINE([LEGACY_FREERDP])
+elif test "x${freerdp_interface}" = "xunknown"; then
+    AC_MSG_WARN([
+  --------------------------------------------
+   Unknown FreeRDP interface
+   RDP will be disabled.
+  --------------------------------------------])
+    have_freerdp=no
+fi
+
+#
+# FreeRDP: rdpSettings
+#
+
+# Check for current (as of 1.1) rdpSettings interface
+AC_CHECK_MEMBERS([rdpSettings.Width,
+                  rdpSettings.Height,
+                  rdpSettings.OrderSupport],
+                 [rdpsettings_interface=stable],,
+                 [[#include <freerdp/freerdp.h>]])
+
+# If not current, check for legacy interface
+if test "x${rdpsettings_interface}" = "xunknown"
+then
+    AC_CHECK_MEMBERS([rdpSettings.width,
+                      rdpSettings.height,
+                      rdpSettings.order_support],
+                     [rdpsettings_interface=legacy],,
+                     [[#include <freerdp/freerdp.h>]])
+fi
+
+# Set defines based on interface type, warn if unknown
+if test "x${rdpsettings_interface}" = "xlegacy"; then
+    AC_DEFINE([LEGACY_RDPSETTINGS])
+elif test "x${rdpsettings_interface}" = "xunknown"; then
+    AC_MSG_WARN([
+  --------------------------------------------
+   Unknown rdpSettings interface
+   RDP will be disabled.
+  --------------------------------------------]) 
+    have_freerdp=no
+fi
+
+#
+# FreeRDP: rdpBitmap
+#
+
+AC_MSG_CHECKING([whether rdpBitmap.Decompress() requires the codec_id])
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([[#include <winpr/wtypes.h>
+                                    #include <freerdp/freerdp.h>
+                                    void __decompress(rdpContext* context,
+                                                      rdpBitmap* bitmap,
+                                                      UINT8* data,
+                                                      int width,
+                                                      int height,
+                                                      int bpp,
+                                                      int length,
+                                                      BOOL compressed,
+                                                      int codec_id);
+                                    rdpBitmap b = { .Decompress = __decompress };]])],
+                  [AC_MSG_RESULT([yes])],
+                  [AC_MSG_RESULT([no])
+                   AC_DEFINE([LEGACY_RDPBITMAP])])
+
+#
+# FreeRDP: rdpPalette
+#
+
+AC_MSG_CHECKING([whether rdpPalette.entries is static])
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([[#include <freerdp/update.h>
+                                    rdpPalette p;
+                                    PALETTE_ENTRY* foo = p.entries;]])],
+                  [AC_MSG_RESULT([yes])],
+                  [AC_MSG_RESULT([no])
+                   AC_DEFINE([LEGACY_RDPPALETTE])])
+
+#
+# FreeRDP: wMessage / RDP_EVENT
+#
+
+# Check for current (as of 1.1) wMessage interface
+AC_CHECK_MEMBERS([wMessage.id],
+                 [event_interface=stable],,
+                 [[#include <winpr/collections.h>]])
+
+# If not current, check for legacy (RDP_EVENT) interface
+if test "x${event_interface}" = "xunknown"
+then
+    AC_CHECK_MEMBERS([RDP_EVENT.event_class],
+                     [event_interface=legacy],,
+                     [[#include <freerdp/types.h>]])
+fi
+
+# Set defines based on interface type, warn if unknown
+if test "x${event_interface}" = "xlegacy"; then
+    AC_DEFINE([LEGACY_EVENT])
+elif test "x${event_interface}" = "xunknown"; then
+    AC_MSG_WARN([
+  --------------------------------------------
+   Unknown event interface
+   RDP will be disabled.
+  --------------------------------------------])
+    have_freerdp=no
+fi
+
+
+AM_CONDITIONAL([LEGACY_FREERDP_EXTENSIONS], [test "x${legacy_freerdp_extensions}" = "xyes"])
+AM_CONDITIONAL([ENABLE_WINPR], [test "x${have_winpr}"   = "xyes"])
+AM_CONDITIONAL([ENABLE_RDP],   [test "x${have_freerdp}" = "xyes"])
 
 AC_SUBST(RDP_LIBS)
 
@@ -230,8 +529,10 @@ $PACKAGE_NAME version $PACKAGE_VERSION
      freerdp ............. ${have_freerdp}
      pango ............... ${have_pango}
      libssh .............. ${have_libssh}
+     libssl .............. ${have_ssl}
      libVNCServer ........ ${have_libvncserver}
      libvorbis ........... ${have_vorbis}
+     libpulse ............ ${have_pulse}
 
    Protocol support:
 

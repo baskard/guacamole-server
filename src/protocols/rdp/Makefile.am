@@ -40,7 +40,6 @@ ACLOCAL_AMFLAGS = -I m4
 AM_CFLAGS = -Werror -Wall -Iinclude @LIBGUAC_INCLUDE@
 
 lib_LTLIBRARIES = libguac-client-rdp.la
-freerdp_LTLIBRARIES = guac_rdpsnd.la guac_rdpdr.la
 
 libguac_client_rdp_la_SOURCES = \
 	audio.c                     \
@@ -58,19 +57,21 @@ libguac_client_rdp_la_SOURCES = \
 	rdp_keymap_fr_fr.c          \
 	rdp_keymap_en_us.c          \
 	rdp_pointer.c               \
+	rdp_settings.c              \
 	wav_encoder.c
 
-guac_rdpsnd_la_SOURCES =          \
+guacsnd_sources =                 \
 	guac_rdpsnd/rdpsnd_messages.c \
 	guac_rdpsnd/rdpsnd_service.c  \
 	audio.c
 
-guac_rdpdr_la_SOURCES =         \
+guacdr_sources =                \
 	guac_rdpdr/rdpdr_messages.c \
 	guac_rdpdr/rdpdr_printer.c  \
 	guac_rdpdr/rdpdr_service.c
 
 noinst_HEADERS =                     \
+	compat/client-cliprdr.h          \
 	guac_rdpdr/rdpdr_messages.h      \
 	guac_rdpdr/rdpdr_printer.h       \
 	guac_rdpdr/rdpdr_service.h       \
@@ -87,7 +88,15 @@ noinst_HEADERS =                     \
 	rdp_glyph.h                      \
 	rdp_keymap.h                     \
 	rdp_pointer.h                    \
+	rdp_settings.h                   \
 	wav_encoder.h
+
+# Add compatibility layer for WinPR if not available
+if ! ENABLE_WINPR
+    noinst_HEADERS  += compat/winpr-stream.h compat/winpr-wtypes.h
+    guacsnd_sources += compat/winpr-stream.c
+    guacdr_sources  += compat/winpr-stream.c
+endif
 
 # Compile OGG support if available
 if ENABLE_OGG
@@ -96,12 +105,40 @@ if ENABLE_OGG
 endif
 
 libguac_client_rdp_la_LDFLAGS = -version-info 0:0:0 @RDP_LIBS@ @VORBIS_LIBS@ @PTHREAD_LIBS@ @CAIRO_LIBS@
-guac_rdpsnd_la_LDFLAGS = -module -avoid-version -shared @RDP_LIBS@ @VORBIS_LIBS@ @PTHREAD_LIBS@
-guac_rdpdr_la_LDFLAGS = -module -avoid-version -shared @RDP_LIBS@ @PTHREAD_LIBS@
+guacsnd_ldflags = -module -avoid-version -shared @RDP_LIBS@ @VORBIS_LIBS@ @PTHREAD_LIBS@
+guacdr_ldflags = -module -avoid-version -shared @RDP_LIBS@ @PTHREAD_LIBS@
 
 libguac_client_rdp_la_LIBADD = @LIBGUAC_LTLIB@
-guac_rdpsnd_la_LIBADD = @LIBGUAC_LTLIB@
-guac_rdpdr_la_LIBADD = @LIBGUAC_LTLIB@
+guacsnd_libadd = @LIBGUAC_LTLIB@
+guacdr_libadd = @LIBGUAC_LTLIB@
+
+if LEGACY_FREERDP_EXTENSIONS
+
+# FreeRDP 1.0-style extensions
+freerdp_LTLIBRARIES = guacsnd.la guacdr.la
+
+guacsnd_la_SOURCES = ${guacsnd_sources}
+guacsnd_la_LDFLAGS = ${guacsnd_ldflags}
+guacsnd_la_LIBADD  = ${guacsnd_libadd}
+
+guacdr_la_SOURCES = ${guacdr_sources}
+guacdr_la_LDFLAGS = ${guacdr_ldflags}
+guacdr_la_LIBADD  = ${guacdr_libadd}
+
+else
+
+# FreeRDP 1.1 (and hopefully onward) extensions
+freerdp_LTLIBRARIES = guacsnd-client.la guacdr-client.la
+
+guacsnd_client_la_SOURCES = ${guacsnd_sources}
+guacsnd_client_la_LDFLAGS = ${guacsnd_ldflags}
+guacsnd_client_la_LIBADD  = ${guacsnd_libadd}
+
+guacdr_client_la_SOURCES = ${guacdr_sources}
+guacdr_client_la_LDFLAGS = ${guacdr_ldflags}
+guacdr_client_la_LIBADD  = ${guacdr_libadd}
+
+endif
 
 freerdpdir = ${libdir}/freerdp
 

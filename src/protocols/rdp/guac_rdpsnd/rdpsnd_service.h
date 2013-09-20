@@ -85,6 +85,11 @@ typedef struct guac_rdpsndPlugin {
     rdpSvcPlugin plugin;
 
     /**
+     * The current audio stream.
+     */
+    audio_stream* audio;
+
+    /**
      * The block number of the last SNDC_WAVE (WaveInfo) PDU received.
      */
     int waveinfo_block_number;
@@ -129,7 +134,7 @@ void guac_rdpsnd_process_connect(rdpSvcPlugin* plugin);
  * Handler called when this plugin receives data along its designated channel.
  */
 void guac_rdpsnd_process_receive(rdpSvcPlugin* plugin,
-        STREAM* input_stream);
+        wStream* input_stream);
 
 /**
  * Handler called when this plugin is being unloaded.
@@ -140,7 +145,7 @@ void guac_rdpsnd_process_terminate(rdpSvcPlugin* plugin);
  * Handler called when this plugin receives an event. For the sake of RDPSND,
  * all events will be ignored and simply free'd.
  */
-void guac_rdpsnd_process_event(rdpSvcPlugin* plugin, RDP_EVENT* event);
+void guac_rdpsnd_process_event(rdpSvcPlugin* plugin, wMessage* event);
 
 #endif
 

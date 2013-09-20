@@ -39,6 +39,12 @@
 #include <pthread.h>
 #include <freerdp/freerdp.h>
 
+#ifdef ENABLE_WINPR
+#include <winpr/wtypes.h>
+#else
+#include "compat/winpr-wtypes.h"
+#endif
+
 #include <guacamole/client.h>
 
 #include "client.h"
@@ -115,7 +121,8 @@ void guac_rdp_gdi_dstblt(rdpContext* context, DSTBLT_ORDER* dstblt) {
 
     /* Clip operation to bounds */
     rdp_guac_client_data* data = (rdp_guac_client_data*) client->data;
-    guac_rdp_clip_rect(data, &x, &y, &w, &h);
+    if (guac_rdp_clip_rect(data, &x, &y, &w, &h))
+        return;
 
     switch (dstblt->bRop) {
 
@@ -201,7 +208,8 @@ void guac_rdp_gdi_patblt(rdpContext* context, PATBLT_ORDER* patblt) {
             "negotiated client capabilities)");
 
     /* Clip operation to bounds */
-    guac_rdp_clip_rect(data, &x, &y, &w, &h);
+    if (guac_rdp_clip_rect(data, &x, &y, &w, &h))
+        return;
 
     /* Render rectangle based on ROP */
     switch (patblt->bRop) {
@@ -289,7 +297,8 @@ void guac_rdp_gdi_scrblt(rdpContext* context, SCRBLT_ORDER* scrblt) {
 
     /* Clip operation to bounds */
     rdp_guac_client_data* data = (rdp_guac_client_data*) client->data;
-    guac_rdp_clip_rect(data, &x, &y, &w, &h);
+    if (guac_rdp_clip_rect(data, &x, &y, &w, &h))
+        return;
 
     /* Update source coordinates */
     x_src += x - scrblt->nLeftRect;
@@ -326,7 +335,8 @@ void guac_rdp_gdi_memblt(rdpContext* context, MEMBLT_ORDER* memblt) {
     }
 
     /* Clip operation to bounds */
-    guac_rdp_clip_rect(data, &x, &y, &w, &h);
+    if (guac_rdp_clip_rect(data, &x, &y, &w, &h))
+        return;
 
     /* Update source coordinates */
     x_src += x - memblt->nLeftRect;
@@ -416,9 +426,12 @@ void guac_rdp_gdi_memblt(rdpContext* context, MEMBLT_ORDER* memblt) {
 
 void guac_rdp_gdi_opaquerect(rdpContext* context, OPAQUE_RECT_ORDER* opaque_rect) {
 
+    /* Get client data */
     guac_client* client = ((rdp_freerdp_context*) context)->client;
-    uint32 color = freerdp_color_convert_var(opaque_rect->color,
-            context->instance->settings->color_depth, 32,
+    rdp_guac_client_data* client_data = (rdp_guac_client_data*) client->data;
+
+    UINT32 color = freerdp_color_convert_var(opaque_rect->color,
+            client_data->settings.color_depth, 32,
             ((rdp_freerdp_context*) context)->clrconv);
 
     const guac_layer* current_layer = ((rdp_guac_client_data*) client->data)->current_surface;
@@ -431,7 +444,8 @@ void guac_rdp_gdi_opaquerect(rdpContext* context, OPAQUE_RECT_ORDER* opaque_rect
     int h = opaque_rect->nHeight;
 
     /* Clip operation to bounds */
-    guac_rdp_clip_rect(data, &x, &y, &w, &h);
+    if (guac_rdp_clip_rect(data, &x, &y, &w, &h))
+        return;
 
     guac_protocol_send_rect(client->socket, current_layer, x, y, w, h);
 
@@ -448,7 +462,11 @@ void guac_rdp_gdi_palette_update(rdpContext* context, PALETTE_UPDATE* palette) {
 
     CLRCONV* clrconv = ((rdp_freerdp_context*) context)->clrconv;
     clrconv->palette->count = palette->number;
+#ifdef LEGACY_RDPPALETTE
     clrconv->palette->entries = palette->entries;
+#else
+    memcpy(clrconv->palette->entries, palette->entries, sizeof(palette->entries));
+#endif
 
 }
 
@@ -459,11 +477,11 @@ void guac_rdp_gdi_set_bounds(rdpContext* context, rdpBounds* bounds) {
 
     /* If no bounds given, clear bounding rect */
     if (bounds == NULL)
-        data->bounded = false;
+        data->bounded = FALSE;
 
     /* Otherwise, set bounding rectangle */
     else {
-        data->bounded = true;
+        data->bounded = TRUE;
         data->bounds_left   = bounds->left;
         data->bounds_top    = bounds->top;
         data->bounds_right  = bounds->right;
@@ -473,7 +491,6 @@ void guac_rdp_gdi_set_bounds(rdpContext* context, rdpBounds* bounds) {
 }
 
 void guac_rdp_gdi_end_paint(rdpContext* context) {
-    guac_client* client = ((rdp_freerdp_context*) context)->client;
-    guac_socket_flush(client->socket);
+    /* IGNORE */
 }
 

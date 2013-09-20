@@ -49,26 +49,19 @@
 
 #include "audio.h"
 #include "rdp_keymap.h"
+#include "rdp_settings.h"
 
 /**
- * The default RDP port.
+ * The maximum duration of a frame in milliseconds.
  */
-#define RDP_DEFAULT_PORT 3389
+#define GUAC_RDP_FRAME_DURATION 40
 
 /**
- * Default screen width, in pixels.
+ * The amount of time to allow per message read within a frame, in
+ * milliseconds. If the server is silent for at least this amount of time, the
+ * frame will be considered finished.
  */
-#define RDP_DEFAULT_WIDTH  1024
-
-/**
- * Default screen height, in pixels.
- */
-#define RDP_DEFAULT_HEIGHT 768 
-
-/**
- * Default color depth, in bits.
- */
-#define RDP_DEFAULT_DEPTH  16 
+#define GUAC_RDP_FRAME_TIMEOUT 0
 
 /**
  * Client data that will remain accessible through the guac_client.
@@ -82,10 +75,9 @@ typedef struct rdp_guac_client_data {
     freerdp* rdp_inst;
 
     /**
-     * The settings structure associated with the FreeRDP client instance
-     * handling the current connection.
+     * All settings associated with the current or pending RDP connection.
      */
-    rdpSettings* settings;
+    guac_rdp_settings settings;
 
     /**
      * Button mask containing the OR'd value of all currently pressed buttons.
@@ -172,16 +164,6 @@ typedef struct rdp_guac_client_data {
     char* clipboard;
 
     /**
-     * Whether audio is enabled.
-     */
-    int audio_enabled;
-
-    /**
-     * Whether printing is enabled.
-     */
-    int printing_enabled;
-
-    /**
      * Audio output, if any.
      */
     audio_stream* audio;
@@ -222,8 +204,11 @@ typedef struct rdp_freerdp_context {
 /**
  * Given the coordinates and dimensions of a rectangle, clips the rectangle to be
  * within the clipping bounds of the client data, if clipping is active.
+ *
+ * Returns 0 if the rectangle given is visible at all, and 1 if the entire
+ * rectangls is outside the clipping rectangle and this invisible.
  */
-void guac_rdp_clip_rect(rdp_guac_client_data* data, int* x, int* y, int* w, int* h);
+int guac_rdp_clip_rect(rdp_guac_client_data* data, int* x, int* y, int* w, int* h);
 
 #endif
 

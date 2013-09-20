@@ -39,7 +39,18 @@
 #include <freerdp/freerdp.h>
 #include <freerdp/channels/channels.h>
 #include <freerdp/utils/event.h>
-#include <freerdp/plugins/cliprdr.h>
+
+#ifdef HAVE_FREERDP_CLIENT_CLIPRDR_H
+#include <freerdp/client/cliprdr.h>
+#else
+#include "compat/client-cliprdr.h"
+#endif
+
+#ifdef ENABLE_WINPR
+#include <winpr/wtypes.h>
+#else
+#include "compat/winpr-wtypes.h"
+#endif
 
 #include <guacamole/client.h>
 #include <guacamole/protocol.h>
@@ -47,56 +58,67 @@
 #include "client.h"
 #include "rdp_cliprdr.h"
 
-void guac_rdp_process_cliprdr_event(guac_client* client, RDP_EVENT* event) {
+void guac_rdp_process_cliprdr_event(guac_client* client, wMessage* event) {
 
+#ifdef LEGACY_EVENT
         switch (event->event_type) {
+#else
+        switch (GetMessageType(event->id)) {
+#endif
 
-            case RDP_EVENT_TYPE_CB_MONITOR_READY:
+            case CliprdrChannel_MonitorReady:
                 guac_rdp_process_cb_monitor_ready(client, event);
                 break;
 
-            case RDP_EVENT_TYPE_CB_FORMAT_LIST:
+            case CliprdrChannel_FormatList:
                 guac_rdp_process_cb_format_list(client,
                         (RDP_CB_FORMAT_LIST_EVENT*) event);
                 break;
 
-            case RDP_EVENT_TYPE_CB_DATA_REQUEST:
+            case CliprdrChannel_DataRequest:
                 guac_rdp_process_cb_data_request(client,
                         (RDP_CB_DATA_REQUEST_EVENT*) event);
                 break;
 
-            case RDP_EVENT_TYPE_CB_DATA_RESPONSE:
+            case CliprdrChannel_DataResponse:
                 guac_rdp_process_cb_data_response(client,
                         (RDP_CB_DATA_RESPONSE_EVENT*) event);
                 break;
 
             default:
+#ifdef LEGACY_EVENT
                 guac_client_log_info(client,
                         "Unknown cliprdr event type: 0x%x",
                         event->event_type);
+#else
+                guac_client_log_info(client,
+                        "Unknown cliprdr event type: 0x%x",
+                        GetMessageType(event->id));
+#endif
+
         }
 
 }
 
-void guac_rdp_process_cb_monitor_ready(guac_client* client, RDP_EVENT* event) {
+void guac_rdp_process_cb_monitor_ready(guac_client* client, wMessage* event) {
 
     rdpChannels* channels = 
         ((rdp_guac_client_data*) client->data)->rdp_inst->context->channels;
 
     RDP_CB_FORMAT_LIST_EVENT* format_list =
         (RDP_CB_FORMAT_LIST_EVENT*) freerdp_event_new(
-            RDP_EVENT_CLASS_CLIPRDR,
-            RDP_EVENT_TYPE_CB_FORMAT_LIST,
+            CliprdrChannel_Class,
+            CliprdrChannel_FormatList,
             NULL, NULL);
 
     /* Received notification of clipboard support. */
 
     /* Respond with supported format list */
-    format_list->formats = (uint32*) malloc(sizeof(uint32));
+    format_list->formats = (UINT32*) malloc(sizeof(UINT32));
     format_list->formats[0] = CB_FORMAT_TEXT;
     format_list->num_formats = 1;
 
-    freerdp_channels_send_event(channels, (RDP_EVENT*) format_list);
+    freerdp_channels_send_event(channels, (wMessage*) format_list);
 
 }
 
@@ -117,15 +139,15 @@ void guac_rdp_process_cb_format_list(guac_client* client,
             /* Create new data request */
             RDP_CB_DATA_REQUEST_EVENT* data_request =
                 (RDP_CB_DATA_REQUEST_EVENT*) freerdp_event_new(
-                        RDP_EVENT_CLASS_CLIPRDR,
-                        RDP_EVENT_TYPE_CB_DATA_REQUEST,
+                        CliprdrChannel_Class,
+                        CliprdrChannel_DataRequest,
                         NULL, NULL);
 
             /* We want plain text */
             data_request->format = CB_FORMAT_TEXT;
 
             /* Send request */
-            freerdp_channels_send_event(channels, (RDP_EVENT*) data_request);
+            freerdp_channels_send_event(channels, (wMessage*) data_request);
             return;
 
         }
@@ -153,22 +175,22 @@ void guac_rdp_process_cb_data_request(guac_client* client,
         /* Create new data response */
         RDP_CB_DATA_RESPONSE_EVENT* data_response =
             (RDP_CB_DATA_RESPONSE_EVENT*) freerdp_event_new(
-                    RDP_EVENT_CLASS_CLIPRDR,
-                    RDP_EVENT_TYPE_CB_DATA_RESPONSE,
+                    CliprdrChannel_Class,
+                    CliprdrChannel_DataResponse,
                     NULL, NULL);
 
         /* Set data and length */
         if (clipboard != NULL) {
-            data_response->data = (uint8*) strdup(clipboard);
+            data_response->data = (UINT8*) strdup(clipboard);
             data_response->size = strlen(clipboard) + 1;
         }
         else {
-            data_response->data = (uint8*) strdup("");
+            data_response->data = (UINT8*) strdup("");
             data_response->size = 1;
         }
 
         /* Send response */
-        freerdp_channels_send_event(channels, (RDP_EVENT*) data_response);
+        freerdp_channels_send_event(channels, (wMessage*) data_response);
 
     }
 

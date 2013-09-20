@@ -38,7 +38,25 @@
 #ifndef __GUAC_VNC_CLIENT_H
 #define __GUAC_VNC_CLIENT_H
 
+#include <guacamole/client.h>
+#include <guacamole/audio.h>
 #include <rfb/rfbclient.h>
+
+#ifdef ENABLE_PULSE
+#include <pulse/pulseaudio.h>
+#endif
+
+/**
+ * The maximum duration of a frame in milliseconds.
+ */
+#define GUAC_VNC_FRAME_DURATION 40
+
+/**
+ * The amount of time to allow per message read within a frame, in
+ * milliseconds. If the server is silent for at least this amount of time, the
+ * frame will be considered finished.
+ */
+#define GUAC_VNC_FRAME_TIMEOUT 0
 
 extern char* __GUAC_CLIENT;
 
@@ -53,7 +71,29 @@ typedef struct vnc_guac_client_data {
     int swap_red_blue;
 
     guac_layer* cursor;
+    
+    /**
+     * Whether audio is enabled.
+     */
+    int audio_enabled;
+    
+    /**
+     * Audio output, if any.
+     */
+    guac_audio_stream* audio;
 
+#ifdef ENABLE_PULSE
+    /**
+     * The name of the PulseAudio server to connect to.
+     */
+    char* pa_servername;
+
+    /**
+     * PulseAudio event loop.
+     */
+    pa_threaded_mainloop* pa_mainloop;
+#endif
+    
 } vnc_guac_client_data;
 
 #endif

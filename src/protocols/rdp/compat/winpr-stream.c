@@ -1,4 +1,3 @@
-
 /* ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
@@ -12,7 +11,7 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * The Original Code is libguac.
+ * The Original Code is libguac-client-rdp.
  *
  * The Initial Developer of the Original Code is
  * Michael Jumper.
@@ -35,57 +34,19 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
-#ifndef _GUAC_TEST_UTIL_SUITE_H
-#define _GUAC_TEST_UTIL_SUITE_H
+#include "winpr-stream.h"
 
-/**
- * Test suite containing unit tests for utility functions built into libguac.
- * These utility functions are included for convenience rather as integral
- * requirements of the core.
- *
- * @file util_suite.h
+/*
+ * NOTE: Because the old API did not support local allocation of the buffer
+ *       for each stream, these compatibility implementations ignore
+ *       the parameters of Stream_New() and Stream_Free() that provide them.
  */
 
+wStream* Stream_New(BYTE* buffer, size_t size) {
+    return stream_new(size);
+}
 
-/**
- * A single Unicode character encoded as one byte with UTF-8.
- */
-#define UTF8_1b "g"
-
-/**
- * A single Unicode character encoded as two bytes with UTF-8.
- */
-#define UTF8_2b "\xc4\xa3"
-
-/**
- * A single Unicode character encoded as three bytes with UTF-8.
- */
-#define UTF8_3b "\xe7\x8a\xac"
-
-/**
- * A single Unicode character encoded as four bytes with UTF-8.
- */
-#define UTF8_4b "\xf0\x90\x84\xa3"
-
-/**
- * Registers the utility test suite with CUnit.
- */
-int register_util_suite();
-
-/**
- * Unit test for the guac_pool structure and related functions. The guac_pool
- * structure provides a consistent source of pooled integers. This unit test
- * checks that the associated functions behave as documented (returning
- * integers in the proper order, allocating new integers as necessary, etc.).
- */
-void test_guac_pool();
-
-/**
- * Unit test for libguac's Unicode convenience functions. This test checks that
- * the functions provided for determining string length, character length, and
- * for reading and writing UTF-8 behave as specified in the documentation.
- */
-void test_guac_unicode();
-
-#endif
+void Stream_Free(wStream* s, BOOL bFreeBuffer) {
+    stream_free(s);
+}
 

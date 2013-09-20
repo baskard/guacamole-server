@@ -12,7 +12,7 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * The Original Code is libguac.
+ * The Original Code is libguac-client-vnc.
  *
  * The Initial Developer of the Original Code is
  * Michael Jumper.
@@ -35,34 +35,49 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
-#ifndef _GUAC_UNICODE_H
-#define _GUAC_UNICODE_H
-
-#include <stddef.h>
+#ifndef __GUAC_VNC_PULSE_H
+#define __GUAC_VNC_PULSE_H
 
 /**
- * Provides functions for manipulating Unicode strings.
- *
- * @file unicode.h
+ * The number of bytes to request for the audio fragments received from
+ * PulseAudio.
  */
+#define GUAC_VNC_AUDIO_FRAGMENT_SIZE 8192
 
 /**
- * Given the initial byte of a single UTF-8 character, returns the overall
- * byte size of the entire character.
- *
- * @param c The initial byte of the character to check.
- * @return The number of bytes in the given character overall.
+ * The minimum number of PCM bytes to wait for before flushing an audio
+ * packet. The current value is 48K, which works out to be around 280ms.
  */
-size_t guac_utf8_charsize(unsigned char c);
+#define GUAC_VNC_PCM_WRITE_RATE 49152
 
 /**
- * Given a UTF-8-encoded string, returns the length of the string in characters
- * (not bytes).
- *
- * @param str The UTF-8 string to calculate the length of.
- * @return The length in characters of the given UTF-8 string.
+ * Rate of audio to stream, in Hz.
  */
-size_t guac_utf8_strlen(const char* str);
+#define GUAC_VNC_AUDIO_RATE     44100
+
+/**
+ * The number of channels to stream.
+ */
+#define GUAC_VNC_AUDIO_CHANNELS 2
+
+/**
+ * The number of bits per sample.
+ */
+#define GUAC_VNC_AUDIO_BPS      16
+
+/**
+ * Starts streaming audio from PulseAudio to the given Guacamole client.
+ *
+ * @param client The client to stream data to.
+ */
+void guac_pa_start_stream(guac_client* client);
+
+/**
+ * Stops streaming audio from PulseAudio to the given Guacamole client.
+ *
+ * @param client The client to stream data to.
+ */
+void guac_pa_stop_stream(guac_client* client);
 
 #endif
 

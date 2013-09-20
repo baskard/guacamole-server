@@ -52,7 +52,18 @@
 #include <freerdp/codec/color.h>
 #include <freerdp/cache/cache.h>
 #include <freerdp/utils/event.h>
-#include <freerdp/plugins/cliprdr.h>
+
+#ifdef HAVE_FREERDP_CLIENT_CLIPRDR_H
+#include <freerdp/client/cliprdr.h>
+#else
+#include "compat/client-cliprdr.h"
+#endif
+
+#ifdef ENABLE_WINPR
+#include <winpr/wtypes.h>
+#else
+#include "compat/winpr-wtypes.h"
+#endif
 
 #include <guacamole/socket.h>
 #include <guacamole/protocol.h>
@@ -94,12 +105,13 @@ int rdp_guac_client_free_handler(guac_client* client) {
 
 }
 
-int rdp_guac_client_handle_messages(guac_client* client) {
+static int rdp_guac_client_wait_for_messages(guac_client* client, int timeout_usecs) {
 
     rdp_guac_client_data* guac_client_data = (rdp_guac_client_data*) client->data;
     freerdp* rdp_inst = guac_client_data->rdp_inst;
     rdpChannels* channels = rdp_inst->context->channels;
 
+    int result;
     int index;
     int max_fd, fd;
     void* read_fds[32];
@@ -107,25 +119,25 @@ int rdp_guac_client_handle_messages(guac_client* client) {
     int read_count = 0;
     int write_count = 0;
     fd_set rfds, wfds;
-    RDP_EVENT* event;
 
     struct timeval timeout = {
-        .tv_sec = 0,
-        .tv_usec = 250000
+        .tv_sec  = 0,
+        .tv_usec = timeout_usecs
     };
 
-    /* get rdp fds */
+    /* Get RDP fds */
     if (!freerdp_get_fds(rdp_inst, read_fds, &read_count, write_fds, &write_count)) {
         guac_error = GUAC_STATUS_BAD_STATE;
         guac_error_message = "Unable to read RDP file descriptors";
-        return 1;
+        return -1;
     }
 
-    /* get channel fds */
-    if (!freerdp_channels_get_fds(channels, rdp_inst, read_fds, &read_count, write_fds, &write_count)) {
+    /* Get channel fds */
+    if (!freerdp_channels_get_fds(channels, rdp_inst, read_fds, &read_count, write_fds,
+                &write_count)) {
         guac_error = GUAC_STATUS_BAD_STATE;
         guac_error_message = "Unable to read RDP channel file descriptors";
-        return 1;
+        return -1;
     }
 
     /* Construct read fd_set */
@@ -151,63 +163,112 @@ int rdp_guac_client_handle_messages(guac_client* client) {
     if (max_fd == 0) {
         guac_error = GUAC_STATUS_BAD_STATE;
         guac_error_message = "No file descriptors";
-        return 1;
+        return -1;
     }
 
-    /* Otherwise, wait for file descriptors given */
-    if (select(max_fd + 1, &rfds, &wfds, NULL, &timeout) == -1) {
-        /* these are not really errors */
-        if (!((errno == EAGAIN) ||
-            (errno == EWOULDBLOCK) ||
-            (errno == EINPROGRESS) ||
-            (errno == EINTR))) /* signal occurred */
-        {
-            guac_error = GUAC_STATUS_SEE_ERRNO;
-            guac_error_message = "Error waiting for file descriptor";
+    /* Wait for all RDP file descriptors */
+    result = select(max_fd + 1, &rfds, &wfds, NULL, &timeout);
+    if (result < 0) {
+
+        /* If error ignorable, pretend timout occurred */
+        if (errno == EAGAIN
+            || errno == EWOULDBLOCK
+            || errno == EINPROGRESS
+            || errno == EINTR)
+            return 0;
+
+        /* Otherwise, return as error */
+        guac_error = GUAC_STATUS_SEE_ERRNO;
+        guac_error_message = "Error waiting for file descriptor";
+        return -1;
+
+    }
+
+    /* Return wait result */
+    return result;
+
+}
+
+int rdp_guac_client_handle_messages(guac_client* client) {
+
+    rdp_guac_client_data* guac_client_data = (rdp_guac_client_data*) client->data;
+    freerdp* rdp_inst = guac_client_data->rdp_inst;
+    rdpChannels* channels = rdp_inst->context->channels;
+    wMessage* event;
+
+    /* Wait for messages */
+    int wait_result = rdp_guac_client_wait_for_messages(client, 250000);
+    guac_timestamp frame_start = guac_timestamp_current();
+    while (wait_result > 0) {
+
+        guac_timestamp frame_end;
+        int frame_remaining;
+
+        pthread_mutex_lock(&(guac_client_data->rdp_lock));
+
+        /* Check the libfreerdp fds */
+        if (!freerdp_check_fds(rdp_inst)) {
+            guac_error = GUAC_STATUS_BAD_STATE;
+            guac_error_message = "Error handling RDP file descriptors";
+            pthread_mutex_unlock(&(guac_client_data->rdp_lock));
             return 1;
         }
+
+        /* Check channel fds */
+        if (!freerdp_channels_check_fds(channels, rdp_inst)) {
+            guac_error = GUAC_STATUS_BAD_STATE;
+            guac_error_message = "Error handling RDP channel file descriptors";
+            pthread_mutex_unlock(&(guac_client_data->rdp_lock));
+            return 1;
+        }
+
+        /* Check for channel events */
+        event = freerdp_channels_pop_event(channels);
+        if (event) {
+
+            /* Handle clipboard events */
+#ifdef LEGACY_EVENT
+            if (event->event_class == CliprdrChannel_Class)
+                guac_rdp_process_cliprdr_event(client, event);
+#else
+            if (GetMessageClass(event->id) == CliprdrChannel_Class)
+                guac_rdp_process_cliprdr_event(client, event);
+#endif
+
+            freerdp_event_free(event);
+
+        }
+
+        /* Handle RDP disconnect */
+        if (freerdp_shall_disconnect(rdp_inst)) {
+            guac_error = GUAC_STATUS_NO_INPUT;
+            guac_error_message = "RDP server closed connection";
+            pthread_mutex_unlock(&(guac_client_data->rdp_lock));
+            return 1;
+        }
+
+        /* Flush any audio */
+        if (guac_client_data->audio != NULL)
+            guac_socket_flush(guac_client_data->audio->stream->socket);
+
+        pthread_mutex_unlock(&(guac_client_data->rdp_lock));
+
+        /* Calculate time remaining in frame */
+        frame_end = guac_timestamp_current();
+        frame_remaining = frame_start + GUAC_RDP_FRAME_DURATION - frame_end;
+
+        /* Wait again if frame remaining */
+        if (frame_remaining > 0)
+            wait_result = rdp_guac_client_wait_for_messages(client,
+                    GUAC_RDP_FRAME_TIMEOUT*1000);
+        else
+            break;
+
     }
 
-    pthread_mutex_lock(&(guac_client_data->rdp_lock));
-
-    /* Check the libfreerdp fds */
-    if (!freerdp_check_fds(rdp_inst)) {
-        guac_error = GUAC_STATUS_BAD_STATE;
-        guac_error_message = "Error handling RDP file descriptors";
+    /* If an error occurred, fail */
+    if (wait_result < 0)
         return 1;
-    }
-
-    /* Check channel fds */
-    if (!freerdp_channels_check_fds(channels, rdp_inst)) {
-        guac_error = GUAC_STATUS_BAD_STATE;
-        guac_error_message = "Error handling RDP channel file descriptors";
-        return 1;
-    }
-
-    /* Check for channel events */
-    event = freerdp_channels_pop_event(channels);
-    if (event) {
-
-        /* Handle clipboard events */
-        if (event->event_class == RDP_EVENT_CLASS_CLIPRDR)
-            guac_rdp_process_cliprdr_event(client, event);
-
-        freerdp_event_free(event);
-
-    }
-
-    /* Handle RDP disconnect */
-    if (freerdp_shall_disconnect(rdp_inst)) {
-        guac_error = GUAC_STATUS_NO_INPUT;
-        guac_error_message = "RDP server closed connection";
-        return 1;
-    }
-
-    pthread_mutex_unlock(&(guac_client_data->rdp_lock));
-
-    /* Flush any audio */
-    if (guac_client_data->audio != NULL)
-        guac_socket_flush(guac_client_data->audio->stream->socket);
 
     /* Success */
     return 0;
@@ -413,8 +474,8 @@ int rdp_guac_client_clipboard_handler(guac_client* client, char* data) {
 
     RDP_CB_FORMAT_LIST_EVENT* format_list =
         (RDP_CB_FORMAT_LIST_EVENT*) freerdp_event_new(
-            RDP_EVENT_CLASS_CLIPRDR,
-            RDP_EVENT_TYPE_CB_FORMAT_LIST,
+            CliprdrChannel_Class,
+            CliprdrChannel_FormatList,
             NULL, NULL);
 
     /* Free existing data */
@@ -424,11 +485,11 @@ int rdp_guac_client_clipboard_handler(guac_client* client, char* data) {
     ((rdp_guac_client_data*) client->data)->clipboard = strdup(data);
 
     /* Notify server that text data is now available */
-    format_list->formats = (uint32*) malloc(sizeof(uint32));
+    format_list->formats = (UINT32*) malloc(sizeof(UINT32));
     format_list->formats[0] = CB_FORMAT_TEXT;
     format_list->num_formats = 1;
 
-    freerdp_channels_send_event(channels, (RDP_EVENT*) format_list);
+    freerdp_channels_send_event(channels, (wMessage*) format_list);
 
     return 0;
 

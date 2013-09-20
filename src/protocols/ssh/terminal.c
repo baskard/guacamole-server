@@ -119,6 +119,14 @@ guac_terminal* guac_terminal_create(guac_client* client,
             default_char.attributes.foreground,
             default_char.attributes.background);
 
+    /* Fail if display init failed */
+    if (term->display == NULL) {
+        guac_error = GUAC_STATUS_BAD_STATE;
+        guac_error_message = "Display initialization failed";
+        free(term);
+        return NULL;
+    }
+
     /* Init terminal state */
     term->current_attributes = default_char.attributes;
     term->default_char = default_char;
@@ -393,6 +401,8 @@ void guac_terminal_scroll_display_down(guac_terminal* terminal,
     }
 
     guac_terminal_display_flush(terminal->display);
+    guac_protocol_send_sync(terminal->client->socket,
+            terminal->client->last_sent_timestamp);
     guac_socket_flush(terminal->client->socket);
 
 }
@@ -450,6 +460,8 @@ void guac_terminal_scroll_display_up(guac_terminal* terminal,
     }
 
     guac_terminal_display_flush(terminal->display);
+    guac_protocol_send_sync(terminal->client->socket,
+            terminal->client->last_sent_timestamp);
     guac_socket_flush(terminal->client->socket);
 
 }

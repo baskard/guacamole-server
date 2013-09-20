@@ -12,7 +12,7 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * The Original Code is libguac.
+ * The Original Code is guacd.
  *
  * The Initial Developer of the Original Code is
  * Michael Jumper.
@@ -35,57 +35,40 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
-#ifndef _GUAC_TEST_UTIL_SUITE_H
-#define _GUAC_TEST_UTIL_SUITE_H
+#ifndef __GUACD_SOCKET_SSL_H
+#define __GUACD_SOCKET_SSL_H
+
+#include <openssl/ssl.h>
+#include <guacamole/socket.h>
 
 /**
- * Test suite containing unit tests for utility functions built into libguac.
- * These utility functions are included for convenience rather as integral
- * requirements of the core.
- *
- * @file util_suite.h
+ * SSL socket-specific data.
  */
+typedef struct guac_socket_ssl_data {
 
+    /**
+     * The file descriptor that SSL communication will take place
+     * over.
+     */
+    int fd;
 
-/**
- * A single Unicode character encoded as one byte with UTF-8.
- */
-#define UTF8_1b "g"
+    /**
+     * The current SSL context.
+     */
+    SSL_CTX* context;
 
-/**
- * A single Unicode character encoded as two bytes with UTF-8.
- */
-#define UTF8_2b "\xc4\xa3"
+    /**
+     * The SSL connection, created automatically via
+     * guac_socket_open_secure().
+     */
+    SSL* ssl;
 
-/**
- * A single Unicode character encoded as three bytes with UTF-8.
- */
-#define UTF8_3b "\xe7\x8a\xac"
-
-/**
- * A single Unicode character encoded as four bytes with UTF-8.
- */
-#define UTF8_4b "\xf0\x90\x84\xa3"
+} guac_socket_ssl_data;
 
 /**
- * Registers the utility test suite with CUnit.
+ * Creates a new guac_socket which will use SSL for all communication.
  */
-int register_util_suite();
-
-/**
- * Unit test for the guac_pool structure and related functions. The guac_pool
- * structure provides a consistent source of pooled integers. This unit test
- * checks that the associated functions behave as documented (returning
- * integers in the proper order, allocating new integers as necessary, etc.).
- */
-void test_guac_pool();
-
-/**
- * Unit test for libguac's Unicode convenience functions. This test checks that
- * the functions provided for determining string length, character length, and
- * for reading and writing UTF-8 behave as specified in the documentation.
- */
-void test_guac_unicode();
+guac_socket* guac_socket_open_secure(SSL_CTX* context, int fd);
 
 #endif
 

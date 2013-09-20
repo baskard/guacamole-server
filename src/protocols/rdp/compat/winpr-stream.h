@@ -1,4 +1,3 @@
-
 /* ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
@@ -12,7 +11,7 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * The Original Code is libguac.
+ * The Original Code is libguac-client-rdp.
  *
  * The Initial Developer of the Original Code is
  * Michael Jumper.
@@ -35,57 +34,43 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
-#ifndef _GUAC_TEST_UTIL_SUITE_H
-#define _GUAC_TEST_UTIL_SUITE_H
+#ifndef __GUAC_WINPR_STREAM_COMPAT_H
+#define __GUAC_WINPR_STREAM_COMPAT_H
 
-/**
- * Test suite containing unit tests for utility functions built into libguac.
- * These utility functions are included for convenience rather as integral
- * requirements of the core.
- *
- * @file util_suite.h
- */
+#include <freerdp/utils/stream.h>
+#include "winpr-wtypes.h"
 
+/* FreeRDP 1.0 streams */
 
-/**
- * A single Unicode character encoded as one byte with UTF-8.
- */
-#define UTF8_1b "g"
+#define Stream_Write                   stream_write
+#define Stream_Write_UINT8             stream_write_uint8
+#define Stream_Write_UINT16            stream_write_uint16
+#define Stream_Write_UINT32            stream_write_uint32
 
-/**
- * A single Unicode character encoded as two bytes with UTF-8.
- */
-#define UTF8_2b "\xc4\xa3"
+#define Stream_Read                    stream_read
+#define Stream_Read_UINT8              stream_read_uint8
+#define Stream_Read_UINT16             stream_read_uint16
+#define Stream_Read_UINT32             stream_read_uint32
 
-/**
- * A single Unicode character encoded as three bytes with UTF-8.
- */
-#define UTF8_3b "\xe7\x8a\xac"
+#define Stream_Seek                    stream_seek
+#define Stream_Seek_UINT8              stream_seek_uint8
+#define Stream_Seek_UINT16             stream_seek_uint16
+#define Stream_Seek_UINT32             stream_seek_uint32
 
-/**
- * A single Unicode character encoded as four bytes with UTF-8.
- */
-#define UTF8_4b "\xf0\x90\x84\xa3"
+#define Stream_GetPointer              stream_get_mark
+#define Stream_EnsureRemainingCapacity stream_check_size
+#define Stream_Write                   stream_write
+#define Stream_GetPosition             stream_get_pos
+#define Stream_SetPosition             stream_set_pos
+#define Stream_SetPointer              stream_set_mark
+#define Stream_Buffer                  stream_get_head
+#define Stream_Pointer                 stream_get_tail
 
-/**
- * Registers the utility test suite with CUnit.
- */
-int register_util_suite();
+#define wStream                        STREAM
+#define wMessage                       RDP_EVENT
 
-/**
- * Unit test for the guac_pool structure and related functions. The guac_pool
- * structure provides a consistent source of pooled integers. This unit test
- * checks that the associated functions behave as documented (returning
- * integers in the proper order, allocating new integers as necessary, etc.).
- */
-void test_guac_pool();
-
-/**
- * Unit test for libguac's Unicode convenience functions. This test checks that
- * the functions provided for determining string length, character length, and
- * for reading and writing UTF-8 behave as specified in the documentation.
- */
-void test_guac_unicode();
+wStream* Stream_New(BYTE* buffer, size_t size);
+void Stream_Free(wStream* s, BOOL bFreeBuffer);
 
 #endif
 

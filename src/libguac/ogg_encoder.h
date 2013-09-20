@@ -35,57 +35,33 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
-#ifndef _GUAC_TEST_UTIL_SUITE_H
-#define _GUAC_TEST_UTIL_SUITE_H
+#ifndef __GUAC_OGG_ENCODER_H
+#define __GUAC_OGG_ENCODER_H
 
-/**
- * Test suite containing unit tests for utility functions built into libguac.
- * These utility functions are included for convenience rather as integral
- * requirements of the core.
- *
- * @file util_suite.h
- */
+#include <guacamole/audio.h>
 
+#include <vorbis/vorbisenc.h>
 
-/**
- * A single Unicode character encoded as one byte with UTF-8.
- */
-#define UTF8_1b "g"
+typedef struct ogg_encoder_state {
 
-/**
- * A single Unicode character encoded as two bytes with UTF-8.
- */
-#define UTF8_2b "\xc4\xa3"
+    /**
+     * Ogg state
+     */
+    ogg_stream_state ogg_state;
+    ogg_page ogg_page;
+    ogg_packet ogg_packet;
 
-/**
- * A single Unicode character encoded as three bytes with UTF-8.
- */
-#define UTF8_3b "\xe7\x8a\xac"
+    /**
+     * Vorbis state
+     */
+    vorbis_info info;
+    vorbis_comment comment;
+    vorbis_dsp_state vorbis_state;
+    vorbis_block vorbis_block;
 
-/**
- * A single Unicode character encoded as four bytes with UTF-8.
- */
-#define UTF8_4b "\xf0\x90\x84\xa3"
+} ogg_encoder_state;
 
-/**
- * Registers the utility test suite with CUnit.
- */
-int register_util_suite();
-
-/**
- * Unit test for the guac_pool structure and related functions. The guac_pool
- * structure provides a consistent source of pooled integers. This unit test
- * checks that the associated functions behave as documented (returning
- * integers in the proper order, allocating new integers as necessary, etc.).
- */
-void test_guac_pool();
-
-/**
- * Unit test for libguac's Unicode convenience functions. This test checks that
- * the functions provided for determining string length, character length, and
- * for reading and writing UTF-8 behave as specified in the documentation.
- */
-void test_guac_unicode();
+extern guac_audio_encoder* ogg_encoder;
 
 #endif
 

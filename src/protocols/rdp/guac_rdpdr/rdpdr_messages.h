@@ -38,6 +38,12 @@
 #ifndef __GUAC_RDPDR_MESSAGES_H
 #define __GUAC_RDPDR_MESSAGES_H
 
+#ifdef ENABLE_WINPR
+#include <winpr/stream.h>
+#else
+#include "compat/winpr-stream.h"
+#endif
+
 #include "rdpdr_service.h"
 
 /**
@@ -76,11 +82,6 @@
  * server, we send "GUAC" as an integer.
  */
 #define GUAC_OS_TYPE (*((uint32_t*) "GUAC"))
-
-/**
- * Arbitray 32-bit unique integer representing the printer device.
- */
-#define GUAC_PRINTER_DEVICE_ID (*((uint32_t*) "GPR1"))
 
 /**
  * Name of the printer driver that should be used on the server.
@@ -183,14 +184,14 @@
  * Message handlers.
  */
 
-void guac_rdpdr_process_server_announce(guac_rdpdrPlugin* rdpdr, STREAM* input_stream);
-void guac_rdpdr_process_clientid_confirm(guac_rdpdrPlugin* rdpdr, STREAM* input_stream);
-void guac_rdpdr_process_device_reply(guac_rdpdrPlugin* rdpdr, STREAM* input_stream);
-void guac_rdpdr_process_device_iorequest(guac_rdpdrPlugin* rdpdr, STREAM* input_stream);
-void guac_rdpdr_process_server_capability(guac_rdpdrPlugin* rdpdr, STREAM* input_stream);
-void guac_rdpdr_process_user_loggedon(guac_rdpdrPlugin* rdpdr, STREAM* input_stream);
-void guac_rdpdr_process_prn_cache_data(guac_rdpdrPlugin* rdpdr, STREAM* input_stream);
-void guac_rdpdr_process_prn_using_xps(guac_rdpdrPlugin* rdpdr, STREAM* input_stream);
+void guac_rdpdr_process_server_announce(guac_rdpdrPlugin* rdpdr, wStream* input_stream);
+void guac_rdpdr_process_clientid_confirm(guac_rdpdrPlugin* rdpdr, wStream* input_stream);
+void guac_rdpdr_process_device_reply(guac_rdpdrPlugin* rdpdr, wStream* input_stream);
+void guac_rdpdr_process_device_iorequest(guac_rdpdrPlugin* rdpdr, wStream* input_stream);
+void guac_rdpdr_process_server_capability(guac_rdpdrPlugin* rdpdr, wStream* input_stream);
+void guac_rdpdr_process_user_loggedon(guac_rdpdrPlugin* rdpdr, wStream* input_stream);
+void guac_rdpdr_process_prn_cache_data(guac_rdpdrPlugin* rdpdr, wStream* input_stream);
+void guac_rdpdr_process_prn_using_xps(guac_rdpdrPlugin* rdpdr, wStream* input_stream);
 
 #endif
 

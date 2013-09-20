@@ -43,10 +43,15 @@
 #include <guacamole/socket.h>
 #include <guacamole/protocol.h>
 #include <guacamole/client.h>
+#include <guacamole/audio.h>
 
 #include "client.h"
 #include "vnc_handlers.h"
 #include "guac_handlers.h"
+
+#ifdef ENABLE_PULSE
+#include "pulse.h"
+#endif
 
 /* Client plugin arguments */
 const char* GUAC_CLIENT_ARGS[] = {
@@ -57,10 +62,17 @@ const char* GUAC_CLIENT_ARGS[] = {
     "password",
     "swap-red-blue",
     "color-depth",
+
 #ifdef ENABLE_VNC_REPEATER
     "dest-host",
     "dest-port",
 #endif
+
+#ifdef ENABLE_PULSE
+    "enable-audio",
+    "audio-servername",
+#endif
+
     NULL
 };
 
@@ -73,10 +85,17 @@ enum VNC_ARGS_IDX {
     IDX_PASSWORD,
     IDX_SWAP_RED_BLUE,
     IDX_COLOR_DEPTH,
+
 #ifdef ENABLE_VNC_REPEATER
     IDX_DEST_HOST,
     IDX_DEST_PORT,
 #endif
+
+#ifdef ENABLE_PULSE
+    IDX_ENABLE_AUDIO,
+    IDX_AUDIO_SERVERNAME,
+#endif
+
     VNC_ARGS_COUNT
 };
 
@@ -141,7 +160,46 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
     rfb_client->GetPassword = guac_vnc_get_password;
 
     /* Depth */
-    guac_vnc_set_pixel_format(rfb_client, atoi(argv[6]));
+    guac_vnc_set_pixel_format(rfb_client, atoi(argv[IDX_COLOR_DEPTH]));
+
+#ifdef ENABLE_PULSE
+    guac_client_data->audio_enabled =
+        (strcmp(argv[IDX_ENABLE_AUDIO], "true") == 0);
+
+    /* If an encoding is available, load an audio stream */
+    if (guac_client_data->audio_enabled) {    
+
+        guac_client_data->audio = guac_audio_stream_alloc(client, NULL);
+
+        /* Load servername if specified */
+        if (argv[IDX_AUDIO_SERVERNAME][0] != '\0')
+            guac_client_data->pa_servername =
+                strdup(argv[IDX_AUDIO_SERVERNAME]);
+        else
+            guac_client_data->pa_servername = NULL;
+
+        /* If successful, init audio system */
+        if (guac_client_data->audio != NULL) {
+            
+            guac_client_log_info(client,
+                    "Audio will be encoded as %s",
+                    guac_client_data->audio->encoder->mimetype);
+
+            /* Require threadsafe sockets if audio enabled */
+            guac_socket_require_threadsafe(client->socket);
+
+            /* Start audio stream */
+            guac_pa_start_stream(client);
+            
+        }
+
+        /* Otherwise, audio loading failed */
+        else
+            guac_client_log_info(client,
+                    "No available audio encoding. Sound disabled.");
+
+    } /* end if audio enabled */
+#endif
 
     /* Hook into allocation so we can handle resize. */
     guac_client_data->rfb_MallocFrameBuffer = rfb_client->MallocFrameBuffer;

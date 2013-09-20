@@ -40,9 +40,15 @@
 
 #include <freerdp/constants.h>
 #include <freerdp/types.h>
-#include <freerdp/utils/memory.h>
-#include <freerdp/utils/stream.h>
 #include <freerdp/utils/svc_plugin.h>
+
+#ifdef ENABLE_WINPR
+#include <winpr/stream.h>
+#include <winpr/wtypes.h>
+#else
+#include "compat/winpr-stream.h"
+#include "compat/winpr-wtypes.h"
+#endif
 
 #include <guacamole/client.h>
 
@@ -50,12 +56,31 @@
 #include "rdpsnd_service.h"
 #include "rdpsnd_messages.h"
 
+/**
+ * Entry point for RDPSND virtual channel.
+ */
+int VirtualChannelEntry(PCHANNEL_ENTRY_POINTS pEntryPoints) {
 
-/* Define service, associate with "rdpsnd" channel */
+    /* Allocate plugin */
+    guac_rdpsndPlugin* rdpsnd =
+        (guac_rdpsndPlugin*) calloc(1, sizeof(guac_rdpsndPlugin));
 
-DEFINE_SVC_PLUGIN(guac_rdpsnd, "rdpsnd",
-    CHANNEL_OPTION_INITIALIZED | CHANNEL_OPTION_ENCRYPT_RDP)
+    /* Init channel def */
+    strcpy(rdpsnd->plugin.channel_def.name, "rdpsnd");
+    rdpsnd->plugin.channel_def.options = 
+        CHANNEL_OPTION_INITIALIZED | CHANNEL_OPTION_ENCRYPT_RDP;
 
+    /* Set callbacks */
+    rdpsnd->plugin.connect_callback   = guac_rdpsnd_process_connect;
+    rdpsnd->plugin.receive_callback   = guac_rdpsnd_process_receive;
+    rdpsnd->plugin.event_callback     = guac_rdpsnd_process_event;
+    rdpsnd->plugin.terminate_callback = guac_rdpsnd_process_terminate;
+
+    /* Finish init */
+    svc_plugin_init((rdpSvcPlugin*) rdpsnd, pEntryPoints);
+    return 1;
+
+}
 
 /* 
  * Service Handlers
@@ -63,40 +88,47 @@ DEFINE_SVC_PLUGIN(guac_rdpsnd, "rdpsnd",
 
 void guac_rdpsnd_process_connect(rdpSvcPlugin* plugin) {
 
-    /* Get audio stream from plugin */
-    audio_stream* audio = (audio_stream*)
-        plugin->channel_entry_points.pExtendedData;
+    guac_rdpsndPlugin* rdpsnd = (guac_rdpsndPlugin*) plugin;
 
+    /* Get audio stream from plugin parameters */
+    audio_stream* audio = rdpsnd->audio =
+        (audio_stream*) plugin->channel_entry_points.pExtendedData;
+
+    /* NULL out pExtendedData so we don't lose our audio_stream due to an
+     * automatic free() within libfreerdp */
+    plugin->channel_entry_points.pExtendedData = NULL;
+
+#ifdef RDPSVCPLUGIN_INTERVAL_MS
     /* Update every 10 ms */
     plugin->interval_ms = 10;
+#endif
 
     /* Log that sound has been loaded */
-    guac_client_log_info(audio->client, "guac_rdpsnd connected.");
+    guac_client_log_info(audio->client, "guacsnd connected.");
 
 }
 
 void guac_rdpsnd_process_terminate(rdpSvcPlugin* plugin) {
-    xfree(plugin);
+    free(plugin);
 }
 
-void guac_rdpsnd_process_event(rdpSvcPlugin* plugin, RDP_EVENT* event) {
+void guac_rdpsnd_process_event(rdpSvcPlugin* plugin, wMessage* event) {
     freerdp_event_free(event);
 }
 
 void guac_rdpsnd_process_receive(rdpSvcPlugin* plugin,
-        STREAM* input_stream) {
+        wStream* input_stream) {
 
     guac_rdpsndPlugin* rdpsnd = (guac_rdpsndPlugin*) plugin;
     guac_rdpsnd_pdu_header header;
 
     /* Get audio stream from plugin */
-    audio_stream* audio = (audio_stream*)
-        plugin->channel_entry_points.pExtendedData;
+    audio_stream* audio = rdpsnd->audio;
 
     /* Read RDPSND PDU header */
-    stream_read_uint8(input_stream, header.message_type);
-    stream_seek_uint8(input_stream);
-    stream_read_uint16(input_stream, header.body_size);
+    Stream_Read_UINT8(input_stream, header.message_type);
+    Stream_Seek_UINT8(input_stream);
+    Stream_Read_UINT16(input_stream, header.body_size);
 
     /* 
      * If next PDU is SNDWAVE (due to receiving WaveInfo PDU previously),

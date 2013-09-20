@@ -39,6 +39,12 @@
 #include <pthread.h>
 #include <freerdp/freerdp.h>
 
+#ifdef ENABLE_WINPR
+#include <winpr/wtypes.h>
+#else
+#include "compat/winpr-wtypes.h"
+#endif
+
 #include <guacamole/client.h>
 #include <guacamole/error.h>
 
@@ -131,7 +137,7 @@ void guac_rdp_glyph_free(rdpContext* context, rdpGlyph* glyph) {
 }
 
 void guac_rdp_glyph_begindraw(rdpContext* context,
-        int x, int y, int width, int height, uint32 fgcolor, uint32 bgcolor) {
+        int x, int y, int width, int height, UINT32 fgcolor, UINT32 bgcolor) {
 
     guac_client* client = ((rdp_freerdp_context*) context)->client;
     rdp_guac_client_data* guac_client_data =
@@ -139,7 +145,7 @@ void guac_rdp_glyph_begindraw(rdpContext* context,
 
     /* Convert foreground color */
     fgcolor = freerdp_color_convert_var(fgcolor,
-            context->instance->settings->color_depth, 32,
+            guac_client_data->settings.color_depth, 32,
             ((rdp_freerdp_context*) context)->clrconv);
 
     /* Fill background with color if specified */
@@ -155,7 +161,7 @@ void guac_rdp_glyph_begindraw(rdpContext* context,
 
         /* Convert background color */
         bgcolor = freerdp_color_convert_var(bgcolor,
-                context->instance->settings->color_depth, 32,
+                guac_client_data->settings.color_depth, 32,
                 ((rdp_freerdp_context*) context)->clrconv);
 
         /* Fill background */
@@ -203,7 +209,7 @@ void guac_rdp_glyph_begindraw(rdpContext* context,
 }
 
 void guac_rdp_glyph_enddraw(rdpContext* context,
-        int x, int y, int width, int height, uint32 fgcolor, uint32 bgcolor) {
+        int x, int y, int width, int height, UINT32 fgcolor, UINT32 bgcolor) {
 
     guac_client* client = ((rdp_freerdp_context*) context)->client;
     rdp_guac_client_data* guac_client_data = (rdp_guac_client_data*) client->data;
@@ -222,24 +228,26 @@ void guac_rdp_glyph_enddraw(rdpContext* context,
     if (height > max_height) height = max_height;
 
     /* Clip operation to clipping region, if any */
-    guac_rdp_clip_rect(guac_client_data, &x, &y, &width, &height);
+    if (!guac_rdp_clip_rect(guac_client_data, &x, &y, &width, &height)) {
 
-    /* Ensure data is ready */
-    cairo_surface_flush(glyph_surface);
+        /* Ensure data is ready */
+        cairo_surface_flush(glyph_surface);
 
-    /* Create surface for subsection with text */
-    cairo_surface_t* surface = cairo_image_surface_create_for_data(
-            cairo_image_surface_get_data(glyph_surface) + 4*x + y*stride,
-            cairo_image_surface_get_format(glyph_surface),
-            width, height, stride);
+        /* Create surface for subsection with text */
+        cairo_surface_t* surface = cairo_image_surface_create_for_data(
+                cairo_image_surface_get_data(glyph_surface) + 4*x + y*stride,
+                cairo_image_surface_get_format(glyph_surface),
+                width, height, stride);
 
-    /* Send surface with all glyphs to layer */
-    guac_protocol_send_png(client->socket,
-            GUAC_COMP_OVER, current_layer, x, y,
-            surface);
+        /* Send surface with all glyphs to layer */
+        guac_protocol_send_png(client->socket,
+                GUAC_COMP_OVER, current_layer, x, y,
+                surface);
 
-    /* Destroy surface */
-    cairo_surface_destroy(surface);
+        /* Destroy surface */
+        cairo_surface_destroy(surface);
+
+    }
 
     /* Destroy cairo instance */
     cairo_destroy(guac_client_data->glyph_cairo);
