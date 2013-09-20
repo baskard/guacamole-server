@@ -1,25 +1,31 @@
-guacamole-server (0.8.2-1) unstable; urgency=low
+guacamole-server (0.8.3-1) unstable; urgency=low
+
+  * Merge changes from 0.8.3
+
+ -- Michael Jumper <mike.jumper@guac-dev.org>  Fri, 20 Sep 2013 10:51:00 -0700
+
+guacamole-server (0.8.2-1) UNRELEASED; urgency=low
 
   * Merge changes from 0.8.2
   * Migrate to new upstream source package (guacamole-server)
 
  -- Michael Jumper <mike.jumper@guac-dev.org>  Mon, 8 Jul 2013 15:29:00 -0700
 
-guacd (0.7.0-2) unstable; urgency=low
+guacd (0.7.0-2) UNRELEASED; urgency=low
 
   * Clean up init.d script, move directory creation to init script (upstream
     ticket #236)
 
  -- Michael Jumper <zhangmaike@users.sourceforge.net>  Thu, 13 Dec 2012 18:21:00 -0800
 
-guacd (0.7.0-1) unstable; urgency=low
+guacd (0.7.0-1) UNRELEASED; urgency=low
 
   * Merge latest changes from 0.7.0
   * Update libguac dependencies
 
  -- Michael Jumper <zhangmaike@users.sourceforge.net>  Sat, 01 Dec 2012 14:36:18 -0800
 
-guacd (0.6.2-1) unstable; urgency=low
+guacd (0.6.2-1) UNRELEASED; urgency=low
 
   * Merge latest changes from 0.6.2 (closes: #685637)
   * Fixed handling of useradd exit code (upstream ticket #194)
@@ -28,13 +34,13 @@ guacd (0.6.2-1) unstable; urgency=low
 
  -- Michael Jumper <zhangmaike@users.sourceforge.net>  Mon, 15 Oct 2012 13:39:00 -0700
 
-guacd (0.6.1-2) unstable; urgency=low
+guacd (0.6.1-2) UNRELEASED; urgency=low
 
   * Run guacd only as unprivileged guacd user, created through install
 
  -- Michael Jumper <zhangmaike@users.sourceforge.net>  Thu, 23 Aug 2012 13:55:00 -0700
 
-guacd (0.6.1-1) unstable; urgency=low
+guacd (0.6.1-1) UNRELEASED; urgency=low
 
   * Merge latest changes from 0.6.1
   * Switched to new guac-dev.org URL pattern in debian/watch
