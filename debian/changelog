@@ -4,6 +4,7 @@ guacamole-server (0.8.3-1) unstable; urgency=low
   * Add build dependency on libpulse-dev
   * Fix short descriptions for libguac-client-*
   * Add patch for subdir-objects option of automake
+  * Bump debian/compat to 9
 
  -- Michael Jumper <mike.jumper@guac-dev.org>  Fri, 20 Sep 2013 10:51:00 -0700
 
