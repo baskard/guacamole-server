@@ -13,7 +13,7 @@
 DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
 
 %:
-	dh --with autoreconf $@ 
+	dh $@ --with autoreconf
 
 # Set lib directory properly for multiarch
 override_dh_auto_configure:
