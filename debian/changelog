@@ -5,6 +5,8 @@ guacamole-server (0.8.3-1) unstable; urgency=low
   * Fix short descriptions for libguac-client-*
   * Add patch for subdir-objects option of automake
   * Migrate to debhelper version 9
+  * Add "Replaces" for legacy libguac1-dev
+  * Suppress guacd log messages within init script
 
  -- Michael Jumper <mike.jumper@guac-dev.org>  Fri, 20 Sep 2013 10:51:00 -0700
 

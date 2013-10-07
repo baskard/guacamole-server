@@ -62,9 +62,10 @@ do_start()
     start-stop-daemon --start --quiet --pidfile $PIDFILE \
         --exec $DAEMON --test > /dev/null || return 1
 
-    # Attenpt to start
+    # Attempt to start
     start-stop-daemon --start --quiet --pidfile $PIDFILE \
-        --exec $DAEMON --chuid guacd:guacd -- $DAEMON_ARGS || return 2
+        --exec $DAEMON --chuid guacd:guacd -- $DAEMON_ARGS 2> /dev/null \
+        || return 2
 
 }
 
