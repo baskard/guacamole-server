@@ -1,70 +1,61 @@
-
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+/*
+ * Copyright (C) 2013 Glyptodon LLC
  *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
  *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
- * The Original Code is libguac-client-rdp.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- * Matt Hortman
- * David PHAM-VAN <d.pham-van@ulteo.com> Ulteo SAS - http://www.ulteo.com
- * Laurent Meunier <laurent@deltalima.net>
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
 #define _XOPEN_SOURCE 500
 
+#include "config.h"
+
+#include "client.h"
+#include "guac_handlers.h"
+#include "guac_pointer_cursor.h"
+#include "guac_string.h"
+#include "rdp_bitmap.h"
+#include "rdp_gdi.h"
+#include "rdp_glyph.h"
+#include "rdp_keymap.h"
+#include "rdp_pointer.h"
+#include "rdp_svc.h"
+
+#include <errno.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
-
 #include <sys/select.h>
-#include <errno.h>
 
-#include <freerdp/freerdp.h>
 #include <freerdp/cache/bitmap.h>
 #include <freerdp/cache/brush.h>
 #include <freerdp/cache/glyph.h>
+#include <freerdp/cache/offscreen.h>
 #include <freerdp/cache/palette.h>
 #include <freerdp/cache/pointer.h>
-#include <freerdp/cache/offscreen.h>
 #include <freerdp/channels/channels.h>
-#include <freerdp/input.h>
 #include <freerdp/constants.h>
-
-#ifdef HAVE_FREERDP_CLIENT_CHANNELS_H
-#include <freerdp/client/channels.h>
-#endif
-
-#ifdef HAVE_FREERDP_ADDIN_H
-#include <freerdp/addin.h>
-#endif
+#include <freerdp/freerdp.h>
+#include <freerdp/input.h>
+#include <guacamole/audio.h>
+#include <guacamole/client.h>
+#include <guacamole/error.h>
+#include <guacamole/protocol.h>
+#include <guacamole/socket.h>
 
 #ifdef ENABLE_WINPR
 #include <winpr/wtypes.h>
@@ -72,26 +63,13 @@
 #include "compat/winpr-wtypes.h"
 #endif
 
-#include <guacamole/socket.h>
-#include <guacamole/protocol.h>
-#include <guacamole/client.h>
-#include <guacamole/error.h>
-
-#include "audio.h"
-#include "wav_encoder.h"
-
-#ifdef ENABLE_OGG
-#include "ogg_encoder.h"
+#ifdef HAVE_FREERDP_ADDIN_H
+#include <freerdp/addin.h>
 #endif
 
-#include "client.h"
-#include "guac_handlers.h"
-#include "rdp_keymap.h"
-#include "rdp_bitmap.h"
-#include "rdp_glyph.h"
-#include "rdp_pointer.h"
-#include "rdp_gdi.h"
-#include "default_pointer.h"
+#ifdef HAVE_FREERDP_CLIENT_CHANNELS_H
+#include <freerdp/client/channels.h>
+#endif
 
 /* Client plugin arguments */
 const char* GUAC_CLIENT_ARGS[] = {
@@ -106,12 +84,18 @@ const char* GUAC_CLIENT_ARGS[] = {
     "color-depth",
     "disable-audio",
     "enable-printing",
+    "enable-drive",
+    "drive-path",
     "console",
     "console-audio",
     "server-layout",
     "security",
     "ignore-cert",
     "disable-auth",
+    "remote-app",
+    "remote-app-dir",
+    "remote-app-args",
+    "static-channels",
     NULL
 };
 
@@ -128,12 +112,18 @@ enum RDP_ARGS_IDX {
     IDX_COLOR_DEPTH,
     IDX_DISABLE_AUDIO,
     IDX_ENABLE_PRINTING,
+    IDX_ENABLE_DRIVE,
+    IDX_DRIVE_PATH,
     IDX_CONSOLE,
     IDX_CONSOLE_AUDIO,
     IDX_SERVER_LAYOUT,
     IDX_SECURITY,
     IDX_IGNORE_CERT,
     IDX_DISABLE_AUTH,
+    IDX_REMOTE_APP,
+    IDX_REMOTE_APP_DIR,
+    IDX_REMOTE_APP_ARGS,
+    IDX_STATIC_CHANNELS,
     RDP_ARGS_COUNT
 };
 
@@ -151,7 +141,6 @@ BOOL rdp_freerdp_pre_connect(freerdp* instance) {
     rdpPointer* pointer;
     rdpPrimaryUpdate* primary;
     CLRCONV* clrconv;
-    int i;
 
     rdp_guac_client_data* guac_client_data =
         (rdp_guac_client_data*) client->data;
@@ -169,30 +158,7 @@ BOOL rdp_freerdp_pre_connect(freerdp* instance) {
     /* If audio enabled, choose an encoder */
     if (guac_client_data->settings.audio_enabled) {
 
-        /* Choose an encoding */
-        for (i=0; client->info.audio_mimetypes[i] != NULL; i++) {
-
-            const char* mimetype = client->info.audio_mimetypes[i];
-
-#ifdef ENABLE_OGG
-            /* If Ogg is supported, done. */
-            if (strcmp(mimetype, ogg_encoder->mimetype) == 0) {
-                guac_client_log_info(client, "Loading Ogg Vorbis encoder.");
-                guac_client_data->audio = audio_stream_alloc(client,
-                        ogg_encoder);
-                break;
-            }
-#endif
-
-            /* If wav is supported, done. */
-            if (strcmp(mimetype, wav_encoder->mimetype) == 0) {
-                guac_client_log_info(client, "Loading wav encoder.");
-                guac_client_data->audio = audio_stream_alloc(client,
-                        wav_encoder);
-                break;
-            }
-
-        }
+        guac_client_data->audio = guac_audio_stream_alloc(client, NULL);
 
         /* If an encoding is available, load the sound plugin */
         if (guac_client_data->audio != NULL) {
@@ -210,8 +176,15 @@ BOOL rdp_freerdp_pre_connect(freerdp* instance) {
 
     } /* end if audio enabled */
 
-    /* If printing enabled, load rdpdr */
-    if (guac_client_data->settings.printing_enabled) {
+    /* Load filesystem if drive enabled */
+    if (guac_client_data->settings.drive_enabled) {
+        guac_client_data->filesystem =
+            guac_rdp_fs_alloc(guac_client_data->settings.drive_path);
+    }
+
+    /* If RDPDR required, load it */
+    if (guac_client_data->settings.printing_enabled
+        || guac_client_data->settings.drive_enabled) {
 
         /* Load RDPDR plugin */
         if (freerdp_channels_load_plugin(channels, instance->settings,
@@ -219,7 +192,62 @@ BOOL rdp_freerdp_pre_connect(freerdp* instance) {
             guac_client_log_error(client,
                     "Failed to load guacdr plugin.");
 
-    } /* end if printing enabled */
+    }
+
+    /* Load RAIL plugin if RemoteApp in use */
+    if (guac_client_data->settings.remote_app != NULL) {
+
+#ifdef LEGACY_FREERDP
+        RDP_PLUGIN_DATA* plugin_data = malloc(sizeof(RDP_PLUGIN_DATA) * 2);
+
+        plugin_data[0].size = sizeof(RDP_PLUGIN_DATA);
+        plugin_data[0].data[0] = guac_client_data->settings.remote_app;
+        plugin_data[0].data[1] = guac_client_data->settings.remote_app_dir;
+        plugin_data[0].data[2] = guac_client_data->settings.remote_app_args; 
+        plugin_data[0].data[3] = NULL;
+
+        plugin_data[1].size = 0;
+
+        /* Attempt to load rail */
+        if (freerdp_channels_load_plugin(channels, instance->settings,
+                    "rail", plugin_data))
+            guac_client_log_error(client, "Failed to load rail plugin.");
+#else
+        /* Attempt to load rail */
+        if (freerdp_channels_load_plugin(channels, instance->settings,
+                    "rail", instance->settings))
+            guac_client_log_error(client, "Failed to load rail plugin.");
+#endif
+
+    }
+
+    /* Load SVC plugin instances for all static channels */
+    if (guac_client_data->settings.svc_names != NULL) {
+
+        char** current = guac_client_data->settings.svc_names;
+        do {
+
+            guac_rdp_svc* svc = guac_rdp_alloc_svc(client, *current);
+
+            /* Attempt to load guacsvc plugin for new static channel */
+            if (freerdp_channels_load_plugin(channels, instance->settings,
+                        "guacsvc", svc)) {
+                guac_client_log_error(client,
+                        "Failed to load guacsvc plugin for channel \"%s\".",
+                        svc->name);
+                guac_rdp_free_svc(svc);
+            }
+
+            /* Store and log on success */
+            else {
+                guac_rdp_add_svc(client, svc);
+                guac_client_log_info(client, "Created static channel \"%s\"...",
+                        svc->name);
+            }
+
+        } while (*(++current) != NULL);
+
+    }
 
     /* Init color conversion structure */
     clrconv = calloc(1, sizeof(CLRCONV));
@@ -290,8 +318,7 @@ BOOL rdp_freerdp_pre_connect(freerdp* instance) {
 
     /* Init channels (pre-connect) */
     if (freerdp_channels_pre_connect(channels, instance)) {
-        guac_protocol_send_error(client->socket, "Error initializing RDP client channel manager");
-        guac_socket_flush(client->socket);
+        guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "Error initializing RDP client channel manager");
         return FALSE;
     }
 
@@ -307,8 +334,7 @@ BOOL rdp_freerdp_post_connect(freerdp* instance) {
 
     /* Init channels (post-connect) */
     if (freerdp_channels_post_connect(channels, instance)) {
-        guac_protocol_send_error(client->socket, "Error initializing RDP client channel manager");
-        guac_socket_flush(client->socket);
+        guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "Error initializing RDP client channel manager");
         return FALSE;
     }
 
@@ -318,6 +344,13 @@ BOOL rdp_freerdp_post_connect(freerdp* instance) {
     client->mouse_handler = rdp_guac_client_mouse_handler;
     client->key_handler = rdp_guac_client_key_handler;
     client->clipboard_handler = rdp_guac_client_clipboard_handler;
+
+    /* File transfer handlers */
+    client->file_handler = rdp_guac_client_file_handler;
+    client->pipe_handler = rdp_guac_client_pipe_handler;
+    client->blob_handler = rdp_guac_client_blob_handler;
+    client->end_handler = rdp_guac_client_end_handler;
+    client->ack_handler = rdp_guac_client_ack_handler;
 
     return TRUE;
 
@@ -393,6 +426,30 @@ void __guac_rdp_client_load_keymap(guac_client* client,
 
 }
 
+/**
+ * Reduces the resolution of the client to the given resolution in DPI if
+ * doing so is reasonable. This function returns non-zero if the resolution
+ * was successfully reduced to the given DPI, and zero if reduction failed.
+ */
+static int __guac_rdp_reduce_resolution(guac_client* client, int resolution) {
+
+    int width  = client->info.optimal_width  * resolution / client->info.optimal_resolution;
+    int height = client->info.optimal_height * resolution / client->info.optimal_resolution;
+
+    /* Reduced resolution if result is reasonably sized */
+    if (width*height >= GUAC_RDP_REASONABLE_AREA) {
+        client->info.optimal_width = width;
+        client->info.optimal_height = height;
+        client->info.optimal_resolution = resolution;
+        guac_client_log_info(client, "Reducing resolution to %ix%i at %i DPI", width, height, resolution);
+        return 1;
+    }
+
+    /* No reduction performed */
+    return 0;
+
+}
+
 int guac_client_init(guac_client* client, int argc, char** argv) {
 
     rdp_guac_client_data* guac_client_data;
@@ -402,14 +459,7 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
 
     /* Validate number of arguments received */
     if (argc != RDP_ARGS_COUNT) {
-
-        guac_protocol_send_error(client->socket,
-                "Wrong argument count received.");
-        guac_socket_flush(client->socket);
-
-        guac_error = GUAC_STATUS_BAD_ARGUMENT;
-        guac_error_message = "Wrong argument count received";
-
+        guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "Wrong argument count received.");
         return 1;
     }
 
@@ -487,6 +537,17 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
     if (argv[IDX_PORT][0] != '\0')
         settings->port = atoi(argv[IDX_PORT]);
 
+    guac_client_log_info(client, "Client resolution is %ix%i at %i DPI",
+            client->info.optimal_width,
+            client->info.optimal_height,
+            client->info.optimal_resolution);
+
+    /* Attempt to reduce resolution for high DPI */
+    if (client->info.optimal_resolution > GUAC_RDP_NATIVE_RESOLUTION
+            && !__guac_rdp_reduce_resolution(client, GUAC_RDP_NATIVE_RESOLUTION)
+            && !__guac_rdp_reduce_resolution(client, GUAC_RDP_HIGH_RESOLUTION))
+        guac_client_log_info(client, "No reasonable lower resolution");
+
     /* Use optimal width unless overridden */
     settings->width = client->info.optimal_width;
     if (argv[IDX_WIDTH][0] != '\0')
@@ -500,8 +561,8 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
                 argv[IDX_WIDTH], settings->width);
     }
 
-    /* Round width up to nearest multiple of 4 */
-    settings->width = (settings->width + 3) & ~0x3;
+    /* Round width down to nearest multiple of 4 */
+    settings->width = settings->width & ~0x3;
 
     /* Use optimal height unless overridden */
     settings->height = client->info.optimal_height;
@@ -536,6 +597,26 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
     if (argv[IDX_INITIAL_PROGRAM][0] != '\0')
         settings->initial_program = strdup(argv[IDX_INITIAL_PROGRAM]);
 
+    /* RemoteApp program */
+    settings->remote_app = NULL;
+    if (argv[IDX_REMOTE_APP][0] != '\0')
+        settings->remote_app = strdup(argv[IDX_REMOTE_APP]);
+
+    /* RemoteApp working directory */
+    settings->remote_app_dir = NULL;
+    if (argv[IDX_REMOTE_APP_DIR][0] != '\0')
+        settings->remote_app_dir = strdup(argv[IDX_REMOTE_APP_DIR]);
+
+    /* RemoteApp arguments */
+    settings->remote_app_args = NULL;
+    if (argv[IDX_REMOTE_APP_ARGS][0] != '\0')
+        settings->remote_app_args = strdup(argv[IDX_REMOTE_APP_ARGS]);
+
+    /* Static virtual channels */
+    settings->svc_names = NULL;
+    if (argv[IDX_STATIC_CHANNELS][0] != '\0')
+        settings->svc_names = guac_split(argv[IDX_STATIC_CHANNELS], ',');
+
     /* Session color depth */
     settings->color_depth = RDP_DEFAULT_DEPTH;
     if (argv[IDX_COLOR_DEPTH][0] != '\0')
@@ -557,6 +638,12 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
     guac_client_data->settings.printing_enabled =
         (strcmp(argv[IDX_ENABLE_PRINTING], "true") == 0);
 
+    /* Drive enable/disable */
+    guac_client_data->settings.drive_enabled =
+        (strcmp(argv[IDX_ENABLE_DRIVE], "true") == 0);
+
+    guac_client_data->settings.drive_path = strdup(argv[IDX_DRIVE_PATH]);
+
     /* Store client data */
     guac_client_data->rdp_inst = rdp_inst;
     guac_client_data->bounded = FALSE;
@@ -564,6 +651,8 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
     guac_client_data->current_surface = GUAC_DEFAULT_LAYER;
     guac_client_data->clipboard = NULL;
     guac_client_data->audio = NULL;
+    guac_client_data->filesystem = NULL;
+    guac_client_data->available_svc = guac_common_list_alloc();
 
     /* Main socket needs to be threadsafe */
     guac_socket_require_threadsafe(client->socket);
@@ -588,40 +677,14 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
     ((rdp_freerdp_context*) rdp_inst->context)->client = client;
 
     /* Pick keymap based on argument */
-    if (argv[IDX_SERVER_LAYOUT][0] != '\0') {
+    settings->server_layout = NULL;
+    if (argv[IDX_SERVER_LAYOUT][0] != '\0')
+        settings->server_layout =
+            guac_rdp_keymap_find(argv[IDX_SERVER_LAYOUT]);
 
-        /* US English Qwerty */
-        if (strcmp("en-us-qwerty", argv[IDX_SERVER_LAYOUT]) == 0)
-            settings->server_layout = &guac_rdp_keymap_en_us;
-
-        /* German Qwertz */
-        else if (strcmp("de-de-qwertz", argv[IDX_SERVER_LAYOUT]) == 0)
-            settings->server_layout = &guac_rdp_keymap_de_de;
-
-        /* French Azerty */
-        else if (strcmp("fr-fr-azerty", argv[IDX_SERVER_LAYOUT]) == 0)
-            settings->server_layout = &guac_rdp_keymap_fr_fr;
-
-        /* Failsafe (Unicode) keymap */
-        else if (strcmp("failsafe", argv[IDX_SERVER_LAYOUT]) == 0)
-            settings->server_layout = &guac_rdp_keymap_failsafe;
-
-        /* If keymap unknown, resort to failsafe */
-        else {
-
-            guac_client_log_error(client,
-                "Unknown layout \"%s\". Using the failsafe layout instead.",
-                argv[IDX_SERVER_LAYOUT]);
-
-            settings->server_layout = &guac_rdp_keymap_failsafe;
-
-        }
-
-    }
-
-    /* If no keymap requested, assume US */
-    else
-        settings->server_layout = &guac_rdp_keymap_en_us;
+    /* If no keymap requested, use default */
+    if (settings->server_layout == NULL)
+        settings->server_layout = guac_rdp_keymap_find(GUAC_DEFAULT_KEYMAP);
 
     /* Load keymap into client */
     __guac_rdp_client_load_keymap(client, settings->server_layout);
@@ -631,14 +694,7 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
 
     /* Connect to RDP server */
     if (!freerdp_connect(rdp_inst)) {
-
-        guac_protocol_send_error(client->socket,
-                "Error connecting to RDP server");
-        guac_socket_flush(client->socket);
-
-        guac_error = GUAC_STATUS_BAD_STATE;
-        guac_error_message = "Error connecting to RDP server";
-
+        guac_client_abort(client, GUAC_PROTOCOL_STATUS_UPSTREAM_ERROR, "Error connecting to RDP server");
         return 1;
     }
 
@@ -660,7 +716,7 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
             CAIRO_FORMAT_ARGB32, settings->width, settings->height);
 
     /* Set default pointer */
-    guac_rdp_set_default_pointer(client);
+    guac_common_set_pointer_cursor(client);
 
     /* Success */
     return 0;
@@ -704,5 +760,4 @@ int guac_rdp_clip_rect(rdp_guac_client_data* data, int* x, int* y, int* w, int* 
     return 0;
 
 }
-
 

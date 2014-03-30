@@ -1,45 +1,41 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac-client-rdp.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+#include "config.h"
+
+#include "client.h"
+#include "debug.h"
+#include "rdp_stream.h"
+#include "rdpdr_fs_service.h"
+#include "rdpdr_messages.h"
+#include "rdpdr_printer.h"
+#include "rdpdr_service.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 #include <freerdp/constants.h>
 #include <freerdp/utils/svc_plugin.h>
+#include <guacamole/client.h>
 
 #ifdef ENABLE_WINPR
 #include <winpr/stream.h>
@@ -48,15 +44,6 @@
 #include "compat/winpr-stream.h"
 #include "compat/winpr-wtypes.h"
 #endif
-
-#include <guacamole/client.h>
-
-#include "rdpdr_service.h"
-#include "rdpdr_messages.h"
-#include "rdpdr_printer.h"
-
-#include "client.h"
-
 
 /**
  * Entry point for RDPDR virtual channel.
@@ -111,6 +98,10 @@ void guac_rdpdr_process_connect(rdpSvcPlugin* plugin) {
     /* Register printer if enabled */
     if (client_data->settings.printing_enabled)
         guac_rdpdr_register_printer(rdpdr);
+
+    /* Register drive if enabled */
+    if (client_data->settings.drive_enabled)
+        guac_rdpdr_register_fs(rdpdr);
 
     /* Log that printing, etc. has been loaded */
     guac_client_log_info(client, "guacdr connected.");
@@ -208,6 +199,74 @@ void guac_rdpdr_process_receive(rdpSvcPlugin* plugin,
 
     else
         guac_client_log_info(rdpdr->client, "Ignoring packet for unknown RDPDR component: 0x%04x", component);
+
+}
+
+wStream* guac_rdpdr_new_io_completion(guac_rdpdr_device* device,
+        int completion_id, int status, int size) {
+
+    wStream* output_stream = Stream_New(NULL, 16+size);
+
+    /* Write header */
+    Stream_Write_UINT16(output_stream, RDPDR_CTYP_CORE);
+    Stream_Write_UINT16(output_stream, PAKID_CORE_DEVICE_IOCOMPLETION);
+
+    /* Write content */
+    Stream_Write_UINT32(output_stream, device->device_id);
+    Stream_Write_UINT32(output_stream, completion_id);
+    Stream_Write_UINT32(output_stream, status);
+
+    return output_stream;
+
+}
+
+void guac_rdpdr_start_download(guac_rdpdr_device* device, const char* path) {
+
+    /* Get client and stream */
+    guac_client* client = device->rdpdr->client;
+
+    int file_id = guac_rdp_fs_open((guac_rdp_fs*) device->data, path,
+            ACCESS_FILE_READ_DATA, 0, DISP_FILE_OPEN, 0);
+
+    /* If file opened successfully, start stream */
+    if (file_id >= 0) {
+
+        guac_rdp_stream* rdp_stream;
+        const char* basename;
+
+        int i;
+        char c;
+
+        /* Associate stream with transfer status */
+        guac_stream* stream = guac_client_alloc_stream(client);
+        stream->data = rdp_stream = malloc(sizeof(guac_rdp_stream));
+        rdp_stream->type = GUAC_RDP_DOWNLOAD_STREAM;
+        rdp_stream->download_status.file_id = file_id;
+        rdp_stream->download_status.offset = 0;
+
+        /* Get basename from absolute path */
+        i=0;
+        basename = path;
+        do {
+
+            c = path[i];
+            if (c == '/' || c == '\\')
+                basename = &(path[i+1]);
+
+            i++;
+
+        } while (c != '\0');
+
+        GUAC_RDP_DEBUG(2, "Initiating download of \"%s\"", path);
+
+        /* Begin stream */
+        guac_protocol_send_file(client->socket, stream,
+                "application/octet-stream", basename);
+        guac_socket_flush(client->socket);
+
+    }
+    else
+        guac_client_log_error(client, "Unable to download \"%s\"", path);
 
 }
 

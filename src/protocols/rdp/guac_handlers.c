@@ -1,63 +1,51 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac-client-rdp.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- * Matt Hortman
- * Jocelyn DELALANDE <j.delalande@ulteo.com> Ulteo SAS - http://www.ulteo.com
- *
- * Portions created by Ulteo SAS employees are Copyright (C) 2012 Ulteo SAS
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+#include "config.h"
 
+#include "client.h"
+#include "guac_handlers.h"
+#include "guac_list.h"
+#include "rdp_cliprdr.h"
+#include "rdp_keymap.h"
+#include "rdp_rail.h"
+#include "rdp_stream.h"
+
+#include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <sys/select.h>
-#include <errno.h>
 
-#include <freerdp/freerdp.h>
-#include <freerdp/channels/channels.h>
-#include <freerdp/input.h>
-#include <freerdp/codec/color.h>
 #include <freerdp/cache/cache.h>
+#include <freerdp/channels/channels.h>
+#include <freerdp/codec/color.h>
+#include <freerdp/freerdp.h>
+#include <freerdp/input.h>
 #include <freerdp/utils/event.h>
-
-#ifdef HAVE_FREERDP_CLIENT_CLIPRDR_H
-#include <freerdp/client/cliprdr.h>
-#else
-#include "compat/client-cliprdr.h"
-#endif
+#include <guacamole/client.h>
+#include <guacamole/error.h>
+#include <guacamole/protocol.h>
+#include <guacamole/socket.h>
 
 #ifdef ENABLE_WINPR
 #include <winpr/wtypes.h>
@@ -65,19 +53,18 @@
 #include "compat/winpr-wtypes.h"
 #endif
 
-#include <guacamole/socket.h>
-#include <guacamole/protocol.h>
-#include <guacamole/client.h>
-#include <guacamole/error.h>
+#ifdef HAVE_FREERDP_CLIENT_CLIPRDR_H
+#include <freerdp/client/cliprdr.h>
+#else
+#include "compat/client-cliprdr.h"
+#endif
 
-#include "client.h"
-#include "rdp_keymap.h"
-#include "rdp_cliprdr.h"
-#include "guac_handlers.h"
+#ifdef LEGACY_FREERDP
+#include "compat/rail.h"
+#endif
 
 void __guac_rdp_update_keysyms(guac_client* client, const int* keysym_string, int from, int to);
 int __guac_rdp_send_keysym(guac_client* client, int keysym, int pressed);
-
 
 int rdp_guac_client_free_handler(guac_client* client) {
 
@@ -94,6 +81,13 @@ int rdp_guac_client_free_handler(guac_client* client) {
     freerdp_clrconv_free(((rdp_freerdp_context*) rdp_inst->context)->clrconv);
     cache_free(rdp_inst->context->cache);
     freerdp_free(rdp_inst);
+
+    /* Clean up filesystem, if allocated */
+    if (guac_client_data->filesystem != NULL)
+        guac_rdp_fs_free(guac_client_data->filesystem);
+
+    /* Free SVC list */
+    guac_common_list_free(guac_client_data->available_svc);
 
     /* Free client data */
     cairo_surface_destroy(guac_client_data->opaque_glyph_surface);
@@ -127,16 +121,14 @@ static int rdp_guac_client_wait_for_messages(guac_client* client, int timeout_us
 
     /* Get RDP fds */
     if (!freerdp_get_fds(rdp_inst, read_fds, &read_count, write_fds, &write_count)) {
-        guac_error = GUAC_STATUS_BAD_STATE;
-        guac_error_message = "Unable to read RDP file descriptors";
+        guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "Unable to read RDP file descriptors.");
         return -1;
     }
 
     /* Get channel fds */
     if (!freerdp_channels_get_fds(channels, rdp_inst, read_fds, &read_count, write_fds,
                 &write_count)) {
-        guac_error = GUAC_STATUS_BAD_STATE;
-        guac_error_message = "Unable to read RDP channel file descriptors";
+        guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "Unable to read RDP channel file descriptors.");
         return -1;
     }
 
@@ -161,8 +153,7 @@ static int rdp_guac_client_wait_for_messages(guac_client* client, int timeout_us
 
     /* If no file descriptors, error */
     if (max_fd == 0) {
-        guac_error = GUAC_STATUS_BAD_STATE;
-        guac_error_message = "No file descriptors";
+        guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "No file descriptors associated with RDP connection.");
         return -1;
     }
 
@@ -178,8 +169,7 @@ static int rdp_guac_client_wait_for_messages(guac_client* client, int timeout_us
             return 0;
 
         /* Otherwise, return as error */
-        guac_error = GUAC_STATUS_SEE_ERRNO;
-        guac_error_message = "Error waiting for file descriptor";
+        guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "Error waiting for file descriptor.");
         return -1;
 
     }
@@ -226,13 +216,17 @@ int rdp_guac_client_handle_messages(guac_client* client) {
         event = freerdp_channels_pop_event(channels);
         if (event) {
 
-            /* Handle clipboard events */
+            /* Handle channel events (clipboard and RAIL) */
 #ifdef LEGACY_EVENT
             if (event->event_class == CliprdrChannel_Class)
                 guac_rdp_process_cliprdr_event(client, event);
+            else if (event->event_class == RailChannel_Class)
+                guac_rdp_process_rail_event(client, event);
 #else
             if (GetMessageClass(event->id) == CliprdrChannel_Class)
                 guac_rdp_process_cliprdr_event(client, event);
+            else if (GetMessageClass(event->id) == RailChannel_Class)
+                guac_rdp_process_rail_event(client, event);
 #endif
 
             freerdp_event_free(event);
@@ -246,10 +240,6 @@ int rdp_guac_client_handle_messages(guac_client* client) {
             pthread_mutex_unlock(&(guac_client_data->rdp_lock));
             return 1;
         }
-
-        /* Flush any audio */
-        if (guac_client_data->audio != NULL)
-            guac_socket_flush(guac_client_data->audio->stream->socket);
 
         pthread_mutex_unlock(&(guac_client_data->rdp_lock));
 
@@ -343,7 +333,6 @@ int rdp_guac_client_mouse_handler(guac_client* client, int x, int y, int mask) {
 
         }
 
-
         guac_client_data->mouse_button_mask = mask;
     }
 
@@ -352,7 +341,6 @@ int rdp_guac_client_mouse_handler(guac_client* client, int x, int y, int mask) {
     return 0;
 }
 
-
 int __guac_rdp_send_keysym(guac_client* client, int keysym, int pressed) {
 
     rdp_guac_client_data* guac_client_data = (rdp_guac_client_data*) client->data;
@@ -360,6 +348,8 @@ int __guac_rdp_send_keysym(guac_client* client, int keysym, int pressed) {
 
     /* If keysym can be in lookup table */
     if (GUAC_RDP_KEYSYM_STORABLE(keysym)) {
+
+        int pressed_flags;
 
         /* Look up scancode mapping */
         const guac_rdp_keysym_desc* keysym_desc =
@@ -378,11 +368,14 @@ int __guac_rdp_send_keysym(guac_client* client, int keysym, int pressed) {
             if (keysym_desc->clear_keysyms != NULL)
                 __guac_rdp_update_keysyms(client, keysym_desc->clear_keysyms, 1, 0);
 
+            /* Determine proper event flag for pressed state */
+            if (pressed)
+                pressed_flags = KBD_FLAGS_DOWN;
+            else
+                pressed_flags = KBD_FLAGS_RELEASE;
+
             /* Send actual key */
-            rdp_inst->input->KeyboardEvent(
-                    rdp_inst->input,
-                    keysym_desc->flags
-                        | (pressed ? KBD_FLAGS_DOWN : KBD_FLAGS_RELEASE),
+            rdp_inst->input->KeyboardEvent(rdp_inst->input, keysym_desc->flags | pressed_flags,
                     keysym_desc->scancode);
 
             /* If defined, release any keys that were originally released */
@@ -492,6 +485,100 @@ int rdp_guac_client_clipboard_handler(guac_client* client, char* data) {
     freerdp_channels_send_event(channels, (wMessage*) format_list);
 
     return 0;
+
+}
+
+int rdp_guac_client_file_handler(guac_client* client, guac_stream* stream,
+        char* mimetype, char* filename) {
+
+    /* All inbound files are file uploads */
+    return guac_rdp_upload_file_handler(client, stream, mimetype, filename);
+
+}
+
+int rdp_guac_client_pipe_handler(guac_client* client, guac_stream* stream,
+        char* mimetype, char* name) {
+
+    /* All inbound pipes are SVC-related */
+    return guac_rdp_svc_pipe_handler(client, stream, mimetype, name);
+
+}
+
+int rdp_guac_client_blob_handler(guac_client* client, guac_stream* stream,
+        void* data, int length) {
+
+    guac_rdp_stream* rdp_stream = (guac_rdp_stream*) stream->data;
+
+    /* Handle based on stream type */
+    switch (rdp_stream->type) {
+
+        /* Inbound file stream */
+        case GUAC_RDP_UPLOAD_STREAM:
+            return guac_rdp_upload_blob_handler(client, stream, data, length);
+
+        /* SVC stream */
+        case GUAC_RDP_INBOUND_SVC_STREAM:
+            return guac_rdp_svc_blob_handler(client, stream, data, length);
+
+        /* Other streams do not accept blobs */
+        default:
+            guac_protocol_send_ack(client->socket, stream,
+                    "FAIL (BLOB NOT EXPECTED)",
+                    GUAC_PROTOCOL_STATUS_CLIENT_BAD_REQUEST);
+
+            guac_socket_flush(client->socket);
+            return 0;
+
+    }
+
+}
+
+int rdp_guac_client_end_handler(guac_client* client, guac_stream* stream) {
+
+    guac_rdp_stream* rdp_stream = (guac_rdp_stream*) stream->data;
+
+    /* Handle based on stream type */
+    switch (rdp_stream->type) {
+
+        /* Inbound file stream */
+        case GUAC_RDP_UPLOAD_STREAM:
+            return guac_rdp_upload_end_handler(client, stream);
+
+        /* Other streams do not accept explicit closure */
+        default:
+            guac_protocol_send_ack(client->socket, stream,
+                    "FAIL (END NOT EXPECTED)",
+                    GUAC_PROTOCOL_STATUS_CLIENT_BAD_REQUEST);
+
+            guac_socket_flush(client->socket);
+            return 0;
+
+    }
+
+}
+
+int rdp_guac_client_ack_handler(guac_client* client, guac_stream* stream,
+        char* message, guac_protocol_status status) {
+
+    guac_rdp_stream* rdp_stream = (guac_rdp_stream*) stream->data;
+
+    /* Ignore acks for non-download stream data */
+    if (rdp_stream == NULL)
+        return 0;
+
+    /* Handle other acks based on stream type */
+    switch (rdp_stream->type) {
+
+        /* Inbound file stream */
+        case GUAC_RDP_DOWNLOAD_STREAM:
+            return guac_rdp_download_ack_handler(
+                    client, stream, message, status);
+
+        /* Ignore acks on all other streams */
+        default:
+            return 0;
+
+    }
 
 }
 

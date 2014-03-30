@@ -1,45 +1,39 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac-client-rdp.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+#include "config.h"
+
+#include "client.h"
+#include "rdpsnd_messages.h"
+#include "rdpsnd_service.h"
 
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <freerdp/constants.h>
 #include <freerdp/utils/svc_plugin.h>
+#include <guacamole/audio.h>
+#include <guacamole/client.h>
 
 #ifdef ENABLE_WINPR
 #include <winpr/stream.h>
@@ -49,17 +43,10 @@
 #include "compat/winpr-wtypes.h"
 #endif
 
-#include <guacamole/client.h>
-
-#include "audio.h"
-#include "rdpsnd_service.h"
-#include "rdpsnd_messages.h"
-#include "client.h"
-
 /* MESSAGE HANDLERS */
 
 void guac_rdpsnd_formats_handler(guac_rdpsndPlugin* rdpsnd,
-        audio_stream* audio, wStream* input_stream, 
+        guac_audio_stream* audio, wStream* input_stream, 
         guac_rdpsnd_pdu_header* header) {
 
     int server_format_count;
@@ -209,7 +196,7 @@ void guac_rdpsnd_formats_handler(guac_rdpsndPlugin* rdpsnd,
 
 /* server is getting a feel of the round trip time */
 void guac_rdpsnd_training_handler(guac_rdpsndPlugin* rdpsnd,
-        audio_stream* audio, wStream* input_stream,
+        guac_audio_stream* audio, wStream* input_stream,
         guac_rdpsnd_pdu_header* header) {
 
     int data_size;
@@ -237,7 +224,7 @@ void guac_rdpsnd_training_handler(guac_rdpsndPlugin* rdpsnd,
 }
 
 void guac_rdpsnd_wave_info_handler(guac_rdpsndPlugin* rdpsnd,
-        audio_stream* audio, wStream* input_stream,
+        guac_audio_stream* audio, wStream* input_stream,
         guac_rdpsnd_pdu_header* header) {
 
     unsigned char buffer[4];
@@ -261,18 +248,18 @@ void guac_rdpsnd_wave_info_handler(guac_rdpsndPlugin* rdpsnd,
     rdpsnd->next_pdu_is_wave = TRUE;
 
     /* Init stream with requested format */
-    audio_stream_begin(audio,
+    guac_audio_stream_begin(audio,
             rdpsnd->formats[format].rate,
             rdpsnd->formats[format].channels,
             rdpsnd->formats[format].bps);
 
     /* Write initial 4 bytes of data */
-    audio_stream_write_pcm(audio, buffer, 4);
+    guac_audio_stream_write_pcm(audio, buffer, 4);
 
 }
 
 void guac_rdpsnd_wave_handler(guac_rdpsndPlugin* rdpsnd,
-        audio_stream* audio, wStream* input_stream,
+        guac_audio_stream* audio, wStream* input_stream,
         guac_rdpsnd_pdu_header* header) {
 
     rdpSvcPlugin* plugin = (rdpSvcPlugin*)rdpsnd;
@@ -287,8 +274,8 @@ void guac_rdpsnd_wave_handler(guac_rdpsndPlugin* rdpsnd,
     unsigned char* buffer = Stream_Buffer(input_stream) + 4;
 
     /* Write rest of audio packet */
-    audio_stream_write_pcm(audio, buffer, rdpsnd->incoming_wave_size);
-    audio_stream_end(audio);
+    guac_audio_stream_write_pcm(audio, buffer, rdpsnd->incoming_wave_size);
+    guac_audio_stream_end(audio);
 
     /* Write Wave Confirmation PDU */
     Stream_Write_UINT8(output_stream, SNDC_WAVECONFIRM);
@@ -309,7 +296,7 @@ void guac_rdpsnd_wave_handler(guac_rdpsndPlugin* rdpsnd,
 }
 
 void guac_rdpsnd_close_handler(guac_rdpsndPlugin* rdpsnd,
-        audio_stream* audio, wStream* input_stream,
+        guac_audio_stream* audio, wStream* input_stream,
         guac_rdpsnd_pdu_header* header) {
 
     /* STUB: Do nothing for now */

@@ -1,44 +1,28 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2010
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
 
 #ifndef _GUAC_INSTRUCTION_H
 #define _GUAC_INSTRUCTION_H
-
-#include "socket.h"
 
 /**
  * Provides functions and structures for reading, writing, and manipulating
@@ -46,6 +30,52 @@
  *
  * @file instruction.h
  */
+
+#include "socket.h"
+
+/**
+ * The maximum number of characters per instruction.
+ */
+#define GUAC_INSTRUCTION_MAX_LENGTH 8192
+
+/**
+ * The maximum number of digits to allow per length prefix.
+ */
+#define GUAC_INSTRUCTION_MAX_DIGITS 5
+
+/**
+ * The maximum number of elements per instruction, including the opcode.
+ */
+#define GUAC_INSTRUCTION_MAX_ELEMENTS 64
+
+/**
+ * All possible states of the instruction parser.
+ */
+typedef enum guac_instruction_parse_state {
+
+    /**
+     * The parser is currently waiting for data to complete the length prefix
+     * of the current element of the instruction.
+     */
+    GUAC_INSTRUCTION_PARSE_LENGTH,
+
+    /**
+     * The parser has finished reading the length prefix and is currently
+     * waiting for data to complete the content of the instruction.
+     */
+    GUAC_INSTRUCTION_PARSE_CONTENT,
+
+    /**
+     * The instruction has been fully parsed.
+     */
+    GUAC_INSTRUCTION_PARSE_COMPLETE,
+
+    /**
+     * The instruction cannot be parsed because of a protocol error.
+     */
+    GUAC_INSTRUCTION_PARSE_ERROR
+
+} guac_instruction_parse_state;
 
 /**
  * Represents a single instruction within the Guacamole protocol.
@@ -67,8 +97,61 @@ typedef struct guac_instruction {
      */
     char** argv;
 
+    /**
+     * The parse state of the instruction.
+     */
+    guac_instruction_parse_state state;
+
+    /**
+     * The length of the current element, if known.
+     */
+    int __element_length;
+
+    /**
+     * The number of elements currently parsed.
+     */
+    int __elementc;
+
+    /**
+     * All currently parsed elements.
+     */
+    char* __elementv[GUAC_INSTRUCTION_MAX_ELEMENTS];
+
 } guac_instruction;
 
+/**
+ * Allocates a new instruction. Each instruction contains within itself the
+ * necessary facilities to parse instruction data.
+ *
+ * @return The newly allocated instruction, or NULL if an error occurs during
+ *         allocation, in which case guac_error will be set appropriately.
+ */
+guac_instruction* guac_instruction_alloc();
+
+/**
+ * Resets the parse state and contents of the given instruction, such that the
+ * memory of that instruction can be reused for another parse cycle.
+ *
+ * @param instruction The instruction to reset.
+ */
+void guac_instruction_reset(guac_instruction* instruction);
+
+/**
+ * Appends data from the given buffer to the given instruction. The data will
+ * be appended, if possible, to this instruction as a reference and thus the
+ * buffer must remain valid throughout the life of the instruction. This
+ * function may modify the contents of the buffer when those contents are
+ * part of an element within the instruction being read.
+ *
+ * @param instruction The instruction to append data to.
+ * @param buffer A buffer containing data that should be appended to this
+ *               instruction.
+ * @param length The number of bytes available for appending within the buffer.
+ * @return The number of bytes appended to this instruction, which may be
+ *         zero if more data is needed.
+ */
+int guac_instruction_append(guac_instruction* instruction,
+        void* buffer, int length);
 
 /**
  * Frees all memory allocated to the given instruction.

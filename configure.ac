@@ -1,47 +1,34 @@
-# ***** BEGIN LICENSE BLOCK *****
-# Version: MPL 1.1/GPL 2.0/LGPL 2.1
 #
-# The contents of this file are subject to the Mozilla Public License Version
-# 1.1 (the "License"); you may not use this file except in compliance with
-# the License. You may obtain a copy of the License at
-# http://www.mozilla.org/MPL/
+# Copyright (C) 2013 Glyptodon LLC
 #
-# Software distributed under the License is distributed on an "AS IS" basis,
-# WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
-# for the specific language governing rights and limitations under the
-# License.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
 #
-# The Original Code is guacamole-server.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
-# The Initial Developer of the Original Code is
-# Michael Jumper.
-# Portions created by the Initial Developer are Copyright (C) 2010
-# the Initial Developer. All Rights Reserved.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 #
-# Contributor(s):
-#
-# Alternatively, the contents of this file may be used under the terms of
-# either the GNU General Public License Version 2 or later (the "GPL"), or
-# the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
-# in which case the provisions of the GPL or the LGPL are applicable instead
-# of those above. If you wish to allow use of your version of this file only
-# under the terms of either the GPL or the LGPL, and not to allow others to
-# use your version of this file under the terms of the MPL, indicate your
-# decision by deleting the provisions above and replace them with the notice
-# and other provisions required by the GPL or the LGPL. If you do not delete
-# the provisions above, a recipient may use your version of this file under
-# the terms of any one of the MPL, the GPL or the LGPL.
-#
-# ***** END LICENSE BLOCK *****
-
 
 AC_PREREQ([2.61])
-AC_INIT([guacamole-server], [0.8.3])
+AC_INIT([guacamole-server], [0.9.0])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign subdir-objects])
+AM_SILENT_RULES([yes])
 
 LT_PREREQ([2.2])
 LT_INIT([dlopen])
 
+AC_CONFIG_HEADER([config.h])
 AC_CONFIG_MACRO_DIR([m4])
 
 # Programs
@@ -53,7 +40,7 @@ AC_PROG_LIBTOOL
 AC_CHECK_HEADERS([fcntl.h stdlib.h string.h sys/socket.h time.h sys/time.h syslog.h unistd.h cairo/cairo.h pngstruct.h])
 
 # Source characteristics
-AC_DEFINE([_POSIX_C_SOURCE], [199309L], [Uses POSIX APIs])
+AC_DEFINE([_POSIX_C_SOURCE], [200809L], [Uses POSIX APIs])
 AC_DEFINE([_BSD_SOURCE],     [],        [Uses BSD APIs])
 
 # libdl
@@ -70,7 +57,8 @@ AC_CHECK_LIB([cairo], [cairo_create], [CAIRO_LIBS=-lcairo],
 
 # libpthread
 AC_CHECK_LIB([pthread], [pthread_create], [PTHREAD_LIBS=-lpthread
-              AC_DEFINE([HAVE_LIBPTHREAD])])
+              AC_DEFINE([HAVE_LIBPTHREAD],,
+                        [Whether libpthread was found])])
 
 # cunit
 AC_CHECK_LIB([cunit], [CU_run_test], [CUNIT_LIBS=-lcunit])
@@ -88,11 +76,13 @@ AC_SUBST(CUNIT_LIBS)
 AC_CHECK_FUNCS([clock_gettime gettimeofday memmove memset select strdup nanosleep])
 
 AC_CHECK_DECL([png_get_io_ptr],
-	[AC_DEFINE([HAVE_PNG_GET_IO_PTR])],,
+	[AC_DEFINE([HAVE_PNG_GET_IO_PTR],,
+               [Whether png_get_io_ptr() is defined])],,
 	[#include <png.h>])
 
 AC_CHECK_DECL([cairo_format_stride_for_width],
-	[AC_DEFINE([HAVE_CAIRO_FORMAT_STRIDE_FOR_WIDTH])],,
+	[AC_DEFINE([HAVE_CAIRO_FORMAT_STRIDE_FOR_WIDTH],,
+               [Whether cairo_format_stride_for_width() is defined])],,
 	[#include <cairo/cairo.h>])
 
 # Typedefs
@@ -102,6 +92,8 @@ AC_TYPE_SSIZE_T
 # Bundled libguac
 AC_SUBST([LIBGUAC_LTLIB],   '$(top_builddir)/src/libguac/libguac.la')
 AC_SUBST([LIBGUAC_INCLUDE], '-I$(top_srcdir)/src/libguac')
+AC_SUBST([COMMON_LTLIB],    '$(top_builddir)/src/common/libguac_common.la')
+AC_SUBST([COMMON_INCLUDE],  '-I$(top_srcdir)/src/common')
 
 # Options
 AC_ARG_WITH(init_dir,
@@ -110,6 +102,11 @@ AC_ARG_WITH(init_dir,
             ],init_dir=$withval)
 AM_CONDITIONAL([ENABLE_INIT], [test "x${init_dir}" != "x"])
 AC_SUBST(init_dir)
+
+AC_ARG_ENABLE(ssh_agent,
+              [AS_HELP_STRING([--enable-ssh-agent],
+                              [enable built-in ssh-agent])
+              ],enable_ssh_agent=yes)
 
 #
 # libssl
@@ -130,7 +127,7 @@ then
    guacd will not support SSL connections.
   --------------------------------------------])
 else
-    AC_DEFINE([ENABLE_SSL])
+    AC_DEFINE([ENABLE_SSL],, [Whether SSL-related support is enabled])
 fi
 
 AC_SUBST(SSL_LIBS)
@@ -157,7 +154,8 @@ then
    Sound will not be encoded with Ogg Vorbis.
   --------------------------------------------])
 else
-    AC_DEFINE([ENABLE_OGG])
+    AC_DEFINE([ENABLE_OGG],,
+              [Whether support for Ogg Vorbis is enabled])
 fi
 
 AC_SUBST(VORBIS_LIBS)
@@ -180,7 +178,7 @@ then
    Sound support for VNC will be disabled
   --------------------------------------------])
 else
-    AC_DEFINE([ENABLE_PULSE])
+    AC_DEFINE([ENABLE_PULSE],, [Whether PulseAudio support is enabled])
 fi
 
 AC_SUBST(PULSE_LIBS)
@@ -225,7 +223,34 @@ then
        Support for VNC repeaters will not be built.
       --------------------------------------------])
     else
-        AC_DEFINE([ENABLE_VNC_REPEATER])
+        AC_DEFINE([ENABLE_VNC_REPEATER],,
+                  [Whether support for VNC repeaters is enabled.])
+    fi
+
+fi
+
+#
+# Listening support within libVNCServer
+#
+
+if test "x${have_libvncserver}" = "xyes"
+then
+
+    have_vnc_listen=yes
+    AC_CHECK_DECL([listenForIncomingConnectionsNoFork],
+                  [], [have_vnc_listen=no],
+                  [[#include <rfb/rfbclient.h>]])
+
+    if test "x${have_vnc_listen}" = "xno"
+    then
+        AC_MSG_WARN([
+      --------------------------------------------
+       No listening support found in libvncclient.
+       Support for listen-mode connections will not be built.
+      --------------------------------------------])
+    else
+        AC_DEFINE([ENABLE_VNC_LISTEN],,
+                  [Whether support for listen-mode VNC connections is enabled.])
     fi
 
 fi
@@ -238,6 +263,7 @@ have_winpr=yes
 have_freerdp=yes
 legacy_freerdp_extensions=no
 rdpsettings_interface=unknown
+rdpsettings_fastpath=yes
 freerdp_interface=unknown
 event_interface=unknown
 RDP_LIBS=
@@ -301,32 +327,33 @@ AC_CHECK_MEMBERS([rdpSvcPlugin.interval_ms],,,
 
 # Keyboard layout header
 AC_CHECK_HEADERS([freerdp/locale/keyboard.h],,
-                  AC_CHECK_HEADERS([freerdp/kbd/layouts.h],,
+                  [AC_CHECK_HEADERS([freerdp/kbd/layouts.h],,
                                    [AC_MSG_WARN([
   --------------------------------------------
    Unable to find keyboard layout headers
    RDP will be disabled.
   --------------------------------------------])
-                                    have_freerdp=no]))
+                                    have_freerdp=no])])
 
 # New headers defining addins
 AC_CHECK_HEADERS([freerdp/addin.h freerdp/client/channels.h])
 
 # Header defining cliprdr
 AC_CHECK_HEADERS([freerdp/client/cliprdr.h],,
-                  AC_CHECK_HEADERS([freerdp/plugins/cliprdr.h],,
+                 [AC_CHECK_HEADERS([freerdp/plugins/cliprdr.h],,
                                    [AC_MSG_WARN([
   --------------------------------------------
    Unable to find cliprdr headers
    RDP will be disabled.
   --------------------------------------------])
                                     have_freerdp=no],
-                                   [#include <freerdp/types.h>]),
+                                   [#include <freerdp/types.h>])],
                  [#include <winpr/wtypes.h>
                   #include <winpr/collections.h>])
 
 AC_CHECK_DECL([freerdp_register_addin_provider],
-	[AC_DEFINE([HAVE_FREERDP_REGISTER_ADDIN_PROVIDER])],,
+	[AC_DEFINE([HAVE_FREERDP_REGISTER_ADDIN_PROVIDER],,
+               [Whether freerdp_register_addin_provider() is defined])],,
 	[#include <freerdp/addin.h>])
 
 #
@@ -358,7 +385,8 @@ AC_CHECK_HEADER(winpr/wtypes.h,,
 
 if test "x${have_winpr}" = "xyes"
 then
-    AC_DEFINE([ENABLE_WINPR])
+    AC_DEFINE([ENABLE_WINPR],,
+              [Whether library support for WinPR types was found])
 fi
 
 #
@@ -380,7 +408,8 @@ fi
 
 # Set defines based on interface type, warn if unknown
 if test "x${freerdp_interface}" = "xlegacy"; then
-    AC_DEFINE([LEGACY_FREERDP])
+    AC_DEFINE([LEGACY_FREERDP],,
+              [Whether the older version of the FreeRDP API was found])
 elif test "x${freerdp_interface}" = "xunknown"; then
     AC_MSG_WARN([
   --------------------------------------------
@@ -397,6 +426,8 @@ fi
 # Check for current (as of 1.1) rdpSettings interface
 AC_CHECK_MEMBERS([rdpSettings.Width,
                   rdpSettings.Height,
+                  rdpSettings.FastPathInput,
+                  rdpSettings.FastPathOutput,
                   rdpSettings.OrderSupport],
                  [rdpsettings_interface=stable],,
                  [[#include <freerdp/freerdp.h>]])
@@ -413,7 +444,15 @@ fi
 
 # Set defines based on interface type, warn if unknown
 if test "x${rdpsettings_interface}" = "xlegacy"; then
-    AC_DEFINE([LEGACY_RDPSETTINGS])
+    AC_DEFINE([LEGACY_RDPSETTINGS],,
+              [Whether the legacy version of the rdpSettings API was found])
+
+    # Legacy interface may not have FastPath settings
+    AC_CHECK_MEMBERS([rdpSettings.fast_path_input,
+                      rdpSettings.fast_path_output],,
+                     [rdpsettings_fastpath=no],
+                     [[#include <freerdp/freerdp.h>]])
+
 elif test "x${rdpsettings_interface}" = "xunknown"; then
     AC_MSG_WARN([
   --------------------------------------------
@@ -421,6 +460,12 @@ elif test "x${rdpsettings_interface}" = "xunknown"; then
    RDP will be disabled.
   --------------------------------------------]) 
     have_freerdp=no
+fi
+
+# Activate FastPath settings if present
+if test "x${rdpsettings_fastpath}" = "xyes"; then
+    AC_DEFINE([HAVE_RDPSETTINGS_FASTPATH],,
+              [Whether the rdpSettings structure has FastPath settings])
 fi
 
 #
@@ -442,7 +487,8 @@ AC_COMPILE_IFELSE([AC_LANG_SOURCE([[#include <winpr/wtypes.h>
                                     rdpBitmap b = { .Decompress = __decompress };]])],
                   [AC_MSG_RESULT([yes])],
                   [AC_MSG_RESULT([no])
-                   AC_DEFINE([LEGACY_RDPBITMAP])])
+                   AC_DEFINE([LEGACY_RDPBITMAP],,
+                             [Whether the legacy rdpBitmap API was found])])
 
 #
 # FreeRDP: rdpPalette
@@ -454,7 +500,18 @@ AC_COMPILE_IFELSE([AC_LANG_SOURCE([[#include <freerdp/update.h>
                                     PALETTE_ENTRY* foo = p.entries;]])],
                   [AC_MSG_RESULT([yes])],
                   [AC_MSG_RESULT([no])
-                   AC_DEFINE([LEGACY_RDPPALETTE])])
+                   AC_DEFINE([LEGACY_RDPPALETTE],,
+                             [Whether the legacy rdpPalette API was found])])
+
+#
+# FreeRDP: rdpPointer
+#
+
+# Check for SetDefault and SetNull members of rdpPointer
+AC_CHECK_MEMBERS([rdpPointer.SetDefault,
+                  rdpPointer.SetNull],
+                 ,,
+                 [[#include <freerdp/freerdp.h>]])
 
 #
 # FreeRDP: wMessage / RDP_EVENT
@@ -475,7 +532,8 @@ fi
 
 # Set defines based on interface type, warn if unknown
 if test "x${event_interface}" = "xlegacy"; then
-    AC_DEFINE([LEGACY_EVENT])
+    AC_DEFINE([LEGACY_EVENT],,
+              [Whether the legacy RDP_EVENT API was found])
 elif test "x${event_interface}" = "xunknown"; then
     AC_MSG_WARN([
   --------------------------------------------
@@ -493,19 +551,54 @@ AM_CONDITIONAL([ENABLE_RDP],   [test "x${have_freerdp}" = "xyes"])
 AC_SUBST(RDP_LIBS)
 
 #
-# libssh
+# libssh2
 #
 
-have_libssh=yes
+have_libssh2=yes
 SSH_LIBS=
 
-AC_CHECK_LIB([ssh], [ssh_new], [SSH_LIBS="$SSH_LIBS -lssh"], [have_libssh=no])
-AM_CONDITIONAL([ENABLE_SSH], [test "x${have_libssh}" = "xyes" -a "x${have_pango}" = "xyes"])
+AC_CHECK_LIB([ssh2], [libssh2_session_init_ex],
+                     [SSH_LIBS="$SSH_LIBS -lssh2"],
+                     [have_libssh2=no])
+AM_CONDITIONAL([ENABLE_SSH], [test "x${have_libssh2}" = "xyes" \
+                                -a "x${have_pango}"   = "xyes" \
+                                -a "x${have_ssl}"     = "xyes"])
 
 AC_SUBST(SSH_LIBS)
 
+#
+# Agent forwarding support within libssh2
+#
+
+have_ssh_agent=no
+if test "x${have_libssh2}" = "xyes" -a "x${enable_ssh_agent}" = "xyes"
+then
+
+    AC_CHECK_DECL([libssh2_channel_request_auth_agent],
+                  [have_ssh_agent=yes], [],
+                  [[#include <libssh2.h>]])
+
+    if test "x${have_ssh_agent}" = "xno"
+    then
+        AC_MSG_ERROR([
+      --------------------------------------------
+       Agent forwarding support was requested but no such support was found
+       in libssh2.
+      --------------------------------------------])
+    else
+        AC_DEFINE([ENABLE_SSH_AGENT],,
+                  [Whether agent forwarding support for SSH is enabled])
+    fi
+
+fi
+
+AM_CONDITIONAL([ENABLE_SSH_AGENT],
+	   [test "x${have_ssh_agent}"   = "xyes" \
+	      -a "x${enable_ssh_agent}" = "xyes"])
+
 AC_CONFIG_FILES([Makefile
                  tests/Makefile
+                 src/common/Makefile
                  src/libguac/Makefile
                  src/guacd/Makefile
                  src/protocols/rdp/Makefile
@@ -528,7 +621,7 @@ $PACKAGE_NAME version $PACKAGE_VERSION
 
      freerdp ............. ${have_freerdp}
      pango ............... ${have_pango}
-     libssh .............. ${have_libssh}
+     libssh2 ............. ${have_libssh2}
      libssl .............. ${have_ssl}
      libVNCServer ........ ${have_libvncserver}
      libvorbis ........... ${have_vorbis}

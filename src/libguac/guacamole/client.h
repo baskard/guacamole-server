@@ -1,58 +1,54 @@
-
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+/*
+ * Copyright (C) 2013 Glyptodon LLC
  *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
  *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
- * The Original Code is libguac.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2010
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
 
 #ifndef _GUAC_CLIENT_H
 #define _GUAC_CLIENT_H
-
-#include <stdarg.h>
-
-#include "instruction.h"
-#include "layer.h"
-#include "pool.h"
-#include "socket.h"
-#include "stream.h"
-#include "timestamp.h"
 
 /**
  * Provides functions and structures required for defining (and handling) a proxy client.
  *
  * @file client.h
  */
+
+#include "instruction.h"
+#include "layer.h"
+#include "pool.h"
+#include "protocol.h"
+#include "socket.h"
+#include "stream.h"
+#include "timestamp.h"
+
+#include <stdarg.h>
+
+/**
+ * The maximum number of inbound streams supported by any one guac_client.
+ */
+#define GUAC_CLIENT_MAX_STREAMS 64
+
+/**
+ * The index of a closed stream.
+ */
+#define GUAC_CLIENT_CLOSED_STREAM_INDEX -1
 
 typedef struct guac_client guac_client;
 
@@ -82,6 +78,35 @@ typedef int guac_client_clipboard_handler(guac_client* client, char* copied);
  */
 typedef int guac_client_size_handler(guac_client* client,
         int width, int height);
+
+/**
+ * Handler for Guacamole file transfer events.
+ */
+typedef int guac_client_file_handler(guac_client* client, guac_stream* stream,
+        char* mimetype, char* filename);
+
+/**
+ * Handler for Guacamole pipe events.
+ */
+typedef int guac_client_pipe_handler(guac_client* client, guac_stream* stream,
+        char* mimetype, char* name);
+
+/**
+ * Handler for Guacamole stream blob events.
+ */
+typedef int guac_client_blob_handler(guac_client* client, guac_stream* stream,
+        void* data, int length);
+
+/**
+ * Handler for Guacamole stream ack events.
+ */
+typedef int guac_client_ack_handler(guac_client* client, guac_stream* stream,
+        char* error, guac_protocol_status status);
+
+/**
+ * Handler for Guacamole stream end events.
+ */
+typedef int guac_client_end_handler(guac_client* client, guac_stream* stream);
 
 /**
  * Handler for Guacamole audio format events.
@@ -203,6 +228,15 @@ typedef struct guac_client_info {
      * does not support video at all, this will be NULL.
      */
     const char** video_mimetypes;
+
+    /**
+     * The DPI of the physical remote display if configured for the optimal
+     * width/height combination described here. This need not be honored by
+     * a client plugin implementation, but if the underlying protocol of the
+     * client plugin supports dynamic sizing of the screen, honoring the
+     * stated resolution of the display size request is recommended.
+     */
+    int optimal_resolution;
 
 } guac_client_info;
 
@@ -356,6 +390,100 @@ struct guac_client {
     guac_client_size_handler* size_handler;
 
     /**
+     * Handler for file events sent by the Guacamole web-client.
+     *
+     * The handler takes a guac_stream which contains the stream index and
+     * will persist through the duration of the transfer, the mimetype of
+     * the file being transferred, and the filename.
+     *
+     * Example:
+     * @code
+     *     int file_handler(guac_client* client, guac_stream* stream,
+     *             char* mimetype, char* filename);
+     *
+     *     int guac_client_init(guac_client* client, int argc, char** argv) {
+     *         client->file_handler = file_handler;
+     *     }
+     * @endcode
+     */
+    guac_client_file_handler* file_handler;
+
+    /**
+     * Handler for pipe events sent by the Guacamole web-client.
+     *
+     * The handler takes a guac_stream which contains the stream index and
+     * will persist through the duration of the transfer, the mimetype of
+     * the data being transferred, and the pipe name.
+     *
+     * Example:
+     * @code
+     *     int pipe_handler(guac_client* client, guac_stream* stream,
+     *             char* mimetype, char* name);
+     *
+     *     int guac_client_init(guac_client* client, int argc, char** argv) {
+     *         client->pipe_handler = pipe_handler;
+     *     }
+     * @endcode
+     */
+    guac_client_pipe_handler* pipe_handler;
+
+    /**
+     * Handler for ack events sent by the Guacamole web-client.
+     *
+     * The handler takes a guac_stream which contains the stream index and
+     * will persist through the duration of the transfer, a string containing
+     * the error or status message, and a status code.
+     *
+     * Example:
+     * @code
+     *     int ack_handler(guac_client* client, guac_stream* stream,
+     *             char* error, guac_protocol_status status);
+     *
+     *     int guac_client_init(guac_client* client, int argc, char** argv) {
+     *         client->ack_handler = ack_handler;
+     *     }
+     * @endcode
+     */
+    guac_client_ack_handler* ack_handler;
+
+    /**
+     * Handler for blob events sent by the Guacamole web-client.
+     *
+     * The handler takes a guac_stream which contains the stream index and
+     * will persist through the duration of the transfer, an arbitrary buffer
+     * containing the blob, and the length of the blob.
+     *
+     * Example:
+     * @code
+     *     int blob_handler(guac_client* client, guac_stream* stream,
+     *             void* data, int length);
+     *
+     *     int guac_client_init(guac_client* client, int argc, char** argv) {
+     *         client->blob_handler = blob_handler;
+     *     }
+     * @endcode
+     */
+    guac_client_blob_handler* blob_handler;
+
+    /**
+     * Handler for stream end events sent by the Guacamole web-client.
+     *
+     * The handler takes only a guac_stream which contains the stream index.
+     * This guac_stream will be disposed of immediately after this event is
+     * finished.
+     *
+     * Example:
+     * @code
+     *     int end_handler(guac_client* client, guac_stream* stream);
+     *
+     *     int guac_client_init(guac_client* client, int argc, char** argv) {
+     *         client->end_handler = end_handler;
+     *     }
+     * @endcode
+     */
+    guac_client_end_handler* end_handler;
+
+    /**
      * Handler for freeing data when the client is being unloaded.
      *
      * This handler will be called when the client needs to be unloaded
@@ -402,7 +530,6 @@ struct guac_client {
      */
     guac_client_log_handler* log_info_handler;
 
-
     /**
      * Handler for logging error messages. This handler will be called
      * via guac_client_log_error() when the client needs to log an error.
@@ -445,6 +572,16 @@ struct guac_client {
      * Pool of stream indices.
      */
     guac_pool* __stream_pool;
+
+    /**
+     * All available output streams (data going to connected client).
+     */
+    guac_stream __output_streams[GUAC_CLIENT_MAX_STREAMS];
+
+    /**
+     * All available input streams (data coming from connected client).
+     */
+    guac_stream __input_streams[GUAC_CLIENT_MAX_STREAMS];
 
 };
 
@@ -535,6 +672,35 @@ void vguac_client_log_error(guac_client* client, const char* format, va_list ap)
 void guac_client_stop(guac_client* client);
 
 /**
+ * Signals the given client to stop gracefully, while also signalling via the
+ * Guacamole protocol that an error has occurred. Note that this is a completely
+ * cooperative signal, and can be ignored by the client or the hosting
+ * daemon. The message given will be logged to the system logs.
+ *
+ * @param client The proxy client to signal to stop.
+ * @param status The status to send over the Guacamole protocol.
+ * @param format A printf-style format string to log.
+ * @param ... Arguments to use when filling the format string for printing.
+ */
+void guac_client_abort(guac_client* client, guac_protocol_status status,
+        const char* format, ...);
+
+/**
+ * Signals the given client to stop gracefully, while also signalling via the
+ * Guacamole protocol that an error has occurred. Note that this is a completely
+ * cooperative signal, and can be ignored by the client or the hosting
+ * daemon. The message given will be logged to the system logs.
+ *
+ * @param client The proxy client to signal to stop.
+ * @param status The status to send over the Guacamole protocol.
+ * @param format A printf-style format string to log.
+ * @param ap The va_list containing the arguments to be used when filling the
+ *           format string for printing.
+ */
+void vguac_client_abort(guac_client* client, guac_protocol_status status,
+        const char* format, va_list ap);
+
+/**
  * Allocates a new buffer (invisible layer). An arbitrary index is
  * automatically assigned if no existing buffer is available for use.
  *
@@ -587,7 +753,6 @@ guac_stream* guac_client_alloc_stream(guac_client* client);
  * @param stream The stream to return to the pool of available stream.
  */
 void guac_client_free_stream(guac_client* client, guac_stream* stream);
-
 
 /**
  * The default Guacamole client layer, layer 0.

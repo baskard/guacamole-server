@@ -1,20 +1,43 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
+#include "config.h"
+
+#include "client.h"
+#include "rdpdr_messages.h"
+#include "rdpdr_printer.h"
+#include "rdpdr_service.h"
+#include "rdp_status.h"
 
 #include <errno.h>
+
+#include <freerdp/utils/svc_plugin.h>
+#include <guacamole/protocol.h>
 
 #ifdef ENABLE_WINPR
 #include <winpr/stream.h>
 #else
 #include "compat/winpr-stream.h"
 #endif
-
-#include <freerdp/utils/svc_plugin.h>
-
-#include <guacamole/protocol.h>
-
-#include "rdpdr_messages.h"
-#include "rdpdr_printer.h"
-#include "rdpdr_service.h"
-#include "client.h"
 
 /* Command to run GhostScript safely as a filter writing PDF */
 char* const guac_rdpdr_pdf_filter_command[] = {
@@ -44,7 +67,7 @@ static void* guac_rdpdr_print_filter_output_thread(void* data) {
     /* Write all output as blobs */
     while ((length = read(printer_data->printer_output, buffer, sizeof(buffer))) > 0)
         guac_protocol_send_blob(device->rdpdr->client->socket,
-                GUAC_RDPDR_PRINTER_BLOB, buffer, length);
+                printer_data->stream, buffer, length);
 
     /* Log any error */
     if (length < 0)
@@ -142,20 +165,14 @@ static int guac_rdpdr_create_print_process(guac_rdpdr_device* device) {
 void guac_rdpdr_process_print_job_create(guac_rdpdr_device* device,
         wStream* input_stream, int completion_id) {
 
-    guac_rdpdr_printer_data* printer_data = (guac_rdpdr_printer_data*) device->data;
-    wStream* output_stream = Stream_New(NULL, 24);
+    guac_rdpdr_printer_data* printer_data =
+        (guac_rdpdr_printer_data*) device->data;
+
+    wStream* output_stream = guac_rdpdr_new_io_completion(device,
+            completion_id, STATUS_SUCCESS, 4);
 
     /* No bytes received yet */
     printer_data->bytes_received = 0;
-
-    /* Write header */
-    Stream_Write_UINT16(output_stream, RDPDR_CTYP_CORE);
-    Stream_Write_UINT16(output_stream, PAKID_CORE_DEVICE_IOCOMPLETION);
-
-    /* Write content */
-    Stream_Write_UINT32(output_stream, device->device_id);
-    Stream_Write_UINT32(output_stream, completion_id);
-    Stream_Write_UINT32(output_stream, 0); /* Success */
     Stream_Write_UINT32(output_stream, 0); /* fileId */
 
     svc_plugin_send((rdpSvcPlugin*) device->rdpdr, output_stream);
@@ -169,7 +186,7 @@ void guac_rdpdr_process_print_job_write(guac_rdpdr_device* device,
     int status=0, length;
     unsigned char* buffer;
 
-    wStream* output_stream = Stream_New(NULL, 24);
+    wStream* output_stream;
 
     Stream_Read_UINT32(input_stream, length);
     Stream_Seek(input_stream, 8);  /* Offset */
@@ -219,11 +236,11 @@ void guac_rdpdr_process_print_job_write(guac_rdpdr_device* device,
         /* Begin file */
         guac_client_log_info(device->rdpdr->client, "Print job created");
         guac_protocol_send_file(device->rdpdr->client->socket,
-                GUAC_RDPDR_PRINTER_BLOB, "application/pdf", filename);
+                printer_data->stream, "application/pdf", filename);
 
         /* Start print process */
         if (guac_rdpdr_create_print_process(device) != 0) {
-            status = 0x80000010;
+            status = STATUS_DEVICE_OFF_LINE;
             length = 0;
         }
 
@@ -238,22 +255,17 @@ void guac_rdpdr_process_print_job_write(guac_rdpdr_device* device,
         length = write(printer_data->printer_input, buffer, length);
         if (length == -1) {
             guac_client_log_error(device->rdpdr->client, "Error writing to printer: %s", strerror(errno));
-            status = 0x80000010;
+            status = STATUS_DEVICE_OFF_LINE;
             length = 0;
         }
 
     }
 
-    /* Write header */
-    Stream_Write_UINT16(output_stream, RDPDR_CTYP_CORE);
-    Stream_Write_UINT16(output_stream, PAKID_CORE_DEVICE_IOCOMPLETION);
+    output_stream = guac_rdpdr_new_io_completion(device, completion_id,
+            status, 5);
 
-    /* Write content */
-    Stream_Write_UINT32(output_stream, device->device_id);
-    Stream_Write_UINT32(output_stream, completion_id);
-    Stream_Write_UINT32(output_stream, status);
     Stream_Write_UINT32(output_stream, length);
-    Stream_Write_UINT8(output_stream, 0); /* padding (stated as optional in spec, but requests fail without) */
+    Stream_Write_UINT8(output_stream, 0); /* Padding */
 
     svc_plugin_send((rdpSvcPlugin*) device->rdpdr, output_stream);
 
@@ -262,8 +274,13 @@ void guac_rdpdr_process_print_job_write(guac_rdpdr_device* device,
 void guac_rdpdr_process_print_job_close(guac_rdpdr_device* device,
         wStream* input_stream, int completion_id) {
 
-    guac_rdpdr_printer_data* printer_data = (guac_rdpdr_printer_data*) device->data;
-    wStream* output_stream = Stream_New(NULL, 24);
+    guac_rdpdr_printer_data* printer_data =
+        (guac_rdpdr_printer_data*) device->data;
+
+    wStream* output_stream = guac_rdpdr_new_io_completion(device,
+            completion_id, STATUS_SUCCESS, 1);
+
+    Stream_Write_UINT32(output_stream, 0); /* padding*/
 
     /* Close input and wait for output thread to finish */
     close(printer_data->printer_input);
@@ -274,17 +291,7 @@ void guac_rdpdr_process_print_job_close(guac_rdpdr_device* device,
 
     /* Close file */
     guac_client_log_info(device->rdpdr->client, "Print job closed");
-    guac_protocol_send_end(device->rdpdr->client->socket, GUAC_RDPDR_PRINTER_BLOB);
-
-    /* Write header */
-    Stream_Write_UINT16(output_stream, RDPDR_CTYP_CORE);
-    Stream_Write_UINT16(output_stream, PAKID_CORE_DEVICE_IOCOMPLETION);
-
-    /* Write content */
-    Stream_Write_UINT32(output_stream, device->device_id);
-    Stream_Write_UINT32(output_stream, completion_id);
-    Stream_Write_UINT32(output_stream, 0); /* NTSTATUS - success */
-    Stream_Write_UINT32(output_stream, 0); /* padding*/
+    guac_protocol_send_end(device->rdpdr->client->socket, printer_data->stream);
 
     svc_plugin_send((rdpSvcPlugin*) device->rdpdr, output_stream);
 
@@ -346,6 +353,8 @@ static void guac_rdpdr_device_printer_iorequest_handler(guac_rdpdr_device* devic
 }
 
 static void guac_rdpdr_device_printer_free_handler(guac_rdpdr_device* device) {
+    guac_rdpdr_printer_data* printer_data = (guac_rdpdr_printer_data*) device->data;
+    guac_client_free_stream(device->rdpdr->client, printer_data->stream);
     free(device->data);
 }
 
@@ -355,6 +364,7 @@ void guac_rdpdr_register_printer(guac_rdpdrPlugin* rdpdr) {
 
     /* Get new device */
     guac_rdpdr_device* device = &(rdpdr->devices[id]);
+    guac_rdpdr_printer_data* printer_data;
 
     /* Init device */
     device->rdpdr       = rdpdr;
@@ -367,7 +377,9 @@ void guac_rdpdr_register_printer(guac_rdpdrPlugin* rdpdr) {
     device->free_handler      = guac_rdpdr_device_printer_free_handler;
 
     /* Init data */
-    device->data = malloc(sizeof(guac_rdpdr_printer_data));
+    printer_data = malloc(sizeof(guac_rdpdr_printer_data));
+    printer_data->stream = guac_client_alloc_stream(rdpdr->client);
+    device->data = printer_data;
 
 }
 

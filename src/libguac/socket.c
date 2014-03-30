@@ -1,40 +1,31 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2010
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- * David PHAM-VAN <d.pham-van@ulteo.com> Ulteo SAS - http://www.ulteo.com
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+#include "config.h"
+
+#include "error.h"
+#include "protocol.h"
+#include "socket.h"
+#include "timestamp.h"
 
 #include <fcntl.h>
 #include <inttypes.h>
@@ -43,6 +34,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifdef __MINGW32__
@@ -50,12 +43,6 @@
 #else
 #include <sys/select.h>
 #endif
-
-#include <time.h>
-#include <sys/time.h>
-
-#include "socket.h"
-#include "error.h"
 
 char __guac_socket_BASE64_CHARACTERS[64] = {
     'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
@@ -65,8 +52,43 @@ char __guac_socket_BASE64_CHARACTERS[64] = {
     '8', '9', '+', '/'
 };
 
+static void* __guac_socket_keep_alive_thread(void* data) {
+
+    /* Calculate sleep interval */
+    struct timespec interval;
+    interval.tv_sec  =  GUAC_SOCKET_KEEP_ALIVE_INTERVAL / 1000;
+    interval.tv_nsec = (GUAC_SOCKET_KEEP_ALIVE_INTERVAL % 1000) * 1000000L;
+
+    /* Socket keep-alive loop */
+    guac_socket* socket = (guac_socket*) data;
+    while (socket->state == GUAC_SOCKET_OPEN) {
+
+        /* Send NOP keep-alive if it's been a while since the last output */
+        guac_timestamp timestamp = guac_timestamp_current();
+        if (timestamp - socket->last_write_timestamp >
+                GUAC_SOCKET_KEEP_ALIVE_INTERVAL) {
+
+            /* Send NOP */
+            if (guac_protocol_send_nop(socket)
+                || guac_socket_flush(socket))
+                break;
+
+        }
+
+        /* Sleep until next keep-alive check */
+        nanosleep(&interval, NULL);
+
+    }
+
+    return NULL;
+
+}
+
 static ssize_t __guac_socket_write(guac_socket* socket,
         const void* buf, size_t count) {
+
+    /* Update timestamp of last write */
+    socket->last_write_timestamp = guac_timestamp_current();
 
     /* If handler defined, call it. */
     if (socket->write_handler)
@@ -122,7 +144,6 @@ int guac_socket_select(guac_socket* socket, int usec_timeout) {
 
 }
 
-
 guac_socket* guac_socket_alloc() {
 
     pthread_mutexattr_t lock_attributes;
@@ -138,23 +159,11 @@ guac_socket* guac_socket_alloc() {
     socket->__ready = 0;
     socket->__written = 0;
     socket->data = NULL;
-
-    /* Allocate instruction buffer */
-    socket->__instructionbuf_size = 1024;
-    socket->__instructionbuf = malloc(socket->__instructionbuf_size);
-
-    /* If no memory available, return with error */
-    if (socket->__instructionbuf == NULL) {
-        guac_error = GUAC_STATUS_NO_MEMORY;
-        guac_error_message = "Could not allocate memory for instruction buffer";
-        free(socket);
-        return NULL;
-    }
+    socket->state = GUAC_SOCKET_OPEN;
 
     /* Init members */
-    socket->__instructionbuf_used_length = 0;
-    socket->__instructionbuf_parse_start = 0;
-    socket->__instructionbuf_elementc = 0;
+    socket->__instructionbuf_unparsed_start = socket->__instructionbuf;
+    socket->__instructionbuf_unparsed_end = socket->__instructionbuf;
 
     /* Default to unsafe threading */
     socket->__threadsafe_instructions = 0;
@@ -177,6 +186,18 @@ guac_socket* guac_socket_alloc() {
 
 void guac_socket_require_threadsafe(guac_socket* socket) {
     socket->__threadsafe_instructions = 1;
+}
+
+void guac_socket_require_keep_alive(guac_socket* socket) {
+
+    /* Keep-alive thread requires a threadsafe socket */
+    guac_socket_require_threadsafe(socket);
+
+    /* Start keep-alive thread */
+    socket->__keep_alive_enabled = 1;
+    pthread_create(&(socket->__keep_alive_thread), NULL,
+                __guac_socket_keep_alive_thread, (void*) socket);
+
 }
 
 void guac_socket_instruction_begin(guac_socket* socket) {
@@ -218,8 +239,15 @@ void guac_socket_free(guac_socket* socket) {
         socket->free_handler(socket);
 
     guac_socket_flush(socket);
+
+    /* Mark as closed */
+    socket->state = GUAC_SOCKET_CLOSED;
+
+    /* Wait for keep-alive, if enabled */
+    if (socket->__keep_alive_enabled)
+        pthread_join(socket->__keep_alive_thread, NULL);
+
     pthread_mutex_destroy(&(socket->__instruction_write_lock));
-    free(socket->__instructionbuf);
     free(socket);
 }
 

@@ -1,44 +1,35 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac-client-rdp.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
 
 #ifndef __GUAC_RDPDR_SERVICE_H
 #define __GUAC_RDPDR_SERVICE_H
 
+#include "config.h"
+
 #include <pthread.h>
+
+#include <freerdp/utils/svc_plugin.h>
+#include <guacamole/client.h>
 
 #ifdef ENABLE_WINPR
 #include <winpr/stream.h>
@@ -46,7 +37,10 @@
 #include "compat/winpr-stream.h"
 #endif
 
-#include <guacamole/client.h>
+/**
+ * The maximum number of bytes to allow for a device read.
+ */
+#define GUAC_RDP_MAX_READ_BUFFER 4194304
 
 typedef struct guac_rdpdrPlugin guac_rdpdrPlugin;
 typedef struct guac_rdpdr_device guac_rdpdr_device;
@@ -112,7 +106,6 @@ struct guac_rdpdr_device {
 
 };
 
-
 /**
  * Structure representing the current state of the Guacamole RDPDR plugin for
  * FreeRDP.
@@ -143,7 +136,6 @@ struct guac_rdpdrPlugin {
 
 };
 
-
 /**
  * Handler called when this plugin is loaded by FreeRDP.
  */
@@ -165,6 +157,18 @@ void guac_rdpdr_process_terminate(rdpSvcPlugin* plugin);
  * all events will be ignored and simply free'd.
  */
 void guac_rdpdr_process_event(rdpSvcPlugin* plugin, wMessage* event);
+
+/**
+ * Creates a new stream which contains the ommon DR_DEVICE_IOCOMPLETION header
+ * used for virtually all responses.
+ */
+wStream* guac_rdpdr_new_io_completion(guac_rdpdr_device* device,
+        int completion_id, int status, int size);
+
+/**
+ * Begins streaming the given file to the user via a Guacamole file stream.
+ */
+void guac_rdpdr_start_download(guac_rdpdr_device* device, const char* path);
 
 #endif
 

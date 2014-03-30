@@ -1,48 +1,28 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2010
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
 
 #ifndef _GUAC_PROTOCOL_H
 #define _GUAC_PROTOCOL_H
-
-#include <cairo/cairo.h>
-
-#include "layer.h"
-#include "socket.h"
-#include "timestamp.h"
 
 /**
  * Provides functions and structures required for communicating using the
@@ -51,6 +31,117 @@
  *
  * @file protocol.h
  */
+
+#include "layer.h"
+#include "socket.h"
+#include "stream.h"
+#include "timestamp.h"
+
+#include <stdarg.h>
+
+#include <cairo/cairo.h>
+
+/**
+ * Set of all possible status codes returned by protocol operations. These
+ * codes relate to Guacamole server/client communication, and not to internal
+ * communication of errors within libguac and linked software.
+ *
+ * In general:
+ *
+ *     0x0000 - 0x00FF: Successful operations.
+ *     0x0100 - 0x01FF: Operations that failed due to implementation status.
+ *     0x0200 - 0x02FF: Operations that failed due to environmental.
+ *     0x0300 - 0x03FF: Operations that failed due to user action.
+ *
+ * There is a general correspondence of these status codes with HTTP response
+ * codes.
+ */
+typedef enum guac_protocol_status {
+
+    /**
+     * The operation succeeded.
+     */
+    GUAC_PROTOCOL_STATUS_SUCCESS = 0x0000,
+
+    /**
+     * The requested operation is unsupported.
+     */
+    GUAC_PROTOCOL_STATUS_UNSUPPORTED = 0x0100,
+
+    /**
+     * The operation could not be performed due to an internal failure.
+     */
+    GUAC_PROTOCOL_STATUS_SERVER_ERROR = 0x0200,
+
+    /**
+     * The operation could not be performed due as the server is busy.
+     */
+    GUAC_PROTOCOL_STATUS_SERVER_BUSY = 0x0201,
+
+    /**
+     * The operation could not be performed because the upstream server
+     * is not responding.
+     */
+    GUAC_PROTOCOL_STATUS_UPSTREAM_TIMEOUT = 0x202,
+
+    /**
+     * The operation was unsuccessful due to an error or otherwise
+     * unexpected condition of the upstream server.
+     */
+    GUAC_PROTOCOL_STATUS_UPSTREAM_ERROR = 0x203,
+
+    /**
+     * The operation could not be performed as the requested resource
+     * does not exist.
+     */
+    GUAC_PROTOCOL_STATUS_RESOURCE_NOT_FOUND = 0x204,
+
+    /**
+     * The operation could not be performed as the requested resource is
+     * already in use.
+     */
+    GUAC_PROTOCOL_STATUS_RESOURCE_CONFLICT = 0x205,
+
+    /**
+     * The operation could not be performed because bad parameters were
+     * given.
+     */
+    GUAC_PROTOCOL_STATUS_CLIENT_BAD_REQUEST = 0x300,
+
+    /**
+     * Permission was denied to perform the operation, as the user is not
+     * yet authorized (not yet logged in, for example).
+     */
+    GUAC_PROTOCOL_STATUS_CLIENT_UNAUTHORIZED = 0x0301,
+
+    /**
+     * Permission was denied to perform the operation, and this permission
+     * will not be granted even if the user is authorized.
+     */
+    GUAC_PROTOCOL_STATUS_CLIENT_FORBIDDEN = 0x0303,
+
+    /**
+     * The client took too long to respond.
+     */
+    GUAC_PROTOCOL_STATUS_CLIENT_TIMEOUT = 0x308,
+
+    /**
+     * The client sent too much data.
+     */
+    GUAC_PROTOCOL_STATUS_CLIENT_OVERRUN = 0x30D,
+
+    /**
+     * The client sent data of an unsupported or unexpected type.
+     */
+    GUAC_PROTOCOL_STATUS_CLIENT_BAD_TYPE = 0x30F,
+
+    /**
+     * The operation failed because the current client is already
+     * using too many resources.
+     */
+    GUAC_PROTOCOL_STATUS_CLIENT_TOO_MANY = 0x31D
+
+} guac_protocol_status;
 
 /**
  * Composite modes used by Guacamole draw instructions. Each
@@ -100,7 +191,6 @@ typedef enum guac_composite_mode {
      */
 
 } guac_composite_mode;
-
 
 /**
  * Default transfer functions. There is no current facility in the
@@ -169,6 +259,23 @@ typedef enum guac_line_join_style {
 /* CONTROL INSTRUCTIONS */
 
 /**
+ * Sends an ack instruction over the given guac_socket connection.
+ *
+ * If an error occurs sending the instruction, a non-zero value is
+ * returned, and guac_error is set appropriately.
+ *
+ * @param socket The guac_socket connection to use.
+ * @param stream The guac_stream associated with the operation this ack is
+ *               acknowledging.
+ * @param error The human-readable description associated with the error or
+ *              status update.
+ * @param status The status code related to the error or status.
+ * @return Zero on success, non-zero on error.
+ */
+int guac_protocol_send_ack(guac_socket* socket, guac_stream* stream,
+        const char* error, guac_protocol_status status);
+
+/**
  * Sends an args instruction over the given guac_socket connection.
  *
  * If an error occurs sending the instruction, a non-zero value is
@@ -210,10 +317,41 @@ int guac_protocol_send_disconnect(guac_socket* socket);
  * returned, and guac_error is set appropriately.
  *
  * @param socket The guac_socket connection to use.
- * @param error The description associated with the error.
+ * @param error The human-readable description associated with the error.
+ * @param status The status code related to the error.
  * @return Zero on success, non-zero on error.
  */
-int guac_protocol_send_error(guac_socket* socket, const char* error);
+int guac_protocol_send_error(guac_socket* socket, const char* error,
+        guac_protocol_status status);
+
+/**
+ * Sends a log instruction over the given guac_socket connection. This is
+ * mainly useful in debugging.
+ *
+ * If an error occurs sending the instruction, a non-zero value is
+ * returned, and guac_error is set appropriately.
+ *
+ * @param socket The guac_socket connection to use.
+ * @param format A printf-style format string to log.
+ * @param ... Arguments to use when filling the format string for printing.
+ * @return Zero on success, non-zero on error.
+ */
+int guac_protocol_send_log(guac_socket* socket, const char* format, ...);
+
+/**
+ * Sends a log instruction over the given guac_socket connection. This is
+ * mainly useful in debugging.
+ *
+ * If an error occurs sending the instruction, a non-zero value is
+ * returned, and guac_error is set appropriately.
+ *
+ * @param socket The guac_socket connection to use.
+ * @param format A printf-style format string to log.
+ * @param ap The va_list containing the arguments to be used when filling the
+ *           format string for printing.
+ */
+int vguac_protocol_send_log(guac_socket* socket, const char* format,
+        va_list args);
 
 /**
  * Sends a nest instruction over the given guac_socket connection.
@@ -230,6 +368,18 @@ int guac_protocol_send_error(guac_socket* socket, const char* error);
  */
 int guac_protocol_send_nest(guac_socket* socket, int index,
         const char* data);
+
+/**
+ * Sends a nop instruction (null-operation) over the given guac_socket
+ * connection.
+ *
+ * If an error occurs sending the instruction, a non-zero value is
+ * returned, and guac_error is set appropriately.
+ *
+ * @param socket The guac_socket connection to use.
+ * @return Zero on success, non-zero on error.
+ */
+int guac_protocol_send_nop(guac_socket* socket);
 
 /**
  * Sends a set instruction over the given guac_socket connection.
@@ -280,78 +430,14 @@ int guac_protocol_send_sync(guac_socket* socket, guac_timestamp timestamp);
  * returned, and guac_error is set appropriately.
  *
  * @param socket The guac_socket connection to use.
- * @param channel The index of the audio channel the sound should play on.
+ * @param stream The stream to use.
+ * @param channel The index of the audio channel to use.
  * @param mimetype The mimetype of the data being sent.
  * @param duration The duration of the sound being sent, in milliseconds.
- * @param data The audio data to be sent.
- * @param size The number of bytes of audio data to send.
  * @return Zero on success, non-zero on error.
  */
-int guac_protocol_send_audio(guac_socket* socket, int channel,
-        const char* mimetype, double duration, void* data, int size);
-
-/**
- * Begins a audio instruction over the given guac_socket connection. Only the
- * initial non-data part of the instruction and the length of the data part
- * of the instruction are sent. The actual contents of the data must be
- * sent with guac_protocol_send_audio_data(), and the instruction must be
- * completed with guac_protocol_send_audio_end().
- *
- * Note that the size of the audio to be sent MUST be known ahead of time,
- * even though the data of the audio may be sent in chunks.
- *
- * No further instruction data may be sent along the givven guac_socket
- * except via guac_protocol_send_audio_data() until the audio instruction
- * is completed with guac_protocol_send_audio_end().
- *
- * Note that if you send this instruction over a threadsafe socket, you
- * MUST also call guac_protocol_send_audio_end() or the socket will be
- * left in an unsafe state.
- *
- * If an error occurs sending the instruction, a non-zero value is
- * returned, and guac_error is set appropriately.
- *
- * @param socket The guac_socket connection to use.
- * @param channel The index of the audio channel the sound should play on.
- * @param mimetype The mimetype of the data being sent.
- * @param duration The duration of the audio being sent, in milliseconds.
- * @param size The number of bytes of audio data to send.
- * @return Zero on success, non-zero on error.
- */
-int guac_protocol_send_audio_header(guac_socket* socket,
-        int channel, const char* mimetype, double duration, int size);
-
-/**
- * Writes a block of audio data to the currently in-progress audio instruction
- * which was started with guac_protocol_send_audio_header(). Exactly the
- * number of requested bytes are written unless an error occurs. This function
- * may be called multiple times per audio instruction for each chunk of audio
- * data being written, allowing the potentially huge audio instruction to be
- * split across multiple writes.
- *
- * If an error occurs sending the instruction, a non-zero value is
- * returned, and guac_error is set appropriately.
- *
- * @param socket The guac_socket connection to use.
- * @param data The audio data to write.
- * @param count The number of bytes within the given buffer of audio data
- *              that must be written.
- * @return Zero on success, non-zero on error.
- */
-int guac_protocol_send_audio_data(guac_socket* socket, void* data, int count);
-
-/**
- * Completes the audio instruction which was started with
- * guac_protocol_send_audio_header(), and whose data has been written with
- * guac_protocol_send_audio_data().
- *
- * If an error occurs sending the instruction, a non-zero value is
- * returned, and guac_error is set appropriately.
- *
- * @param socket The guac_socket connection to use.
- * @return Zero on success, non-zero on error.
- */
-int guac_protocol_send_audio_end(guac_socket* socket);
+int guac_protocol_send_audio(guac_socket* socket, const guac_stream* stream,
+        int channel, const char* mimetype, double duration);
 
 /**
  * Sends a file instruction over the given guac_socket connection.
@@ -360,13 +446,28 @@ int guac_protocol_send_audio_end(guac_socket* socket);
  * returned, and guac_error is set appropriately.
  *
  * @param socket The guac_socket connection to use.
- * @param index The index of the blob that will contain the contents
- *              of this file.
+ * @param stream The stream to use.
  * @param mimetype The mimetype of the data being sent.
  * @param name A name describing the file being sent.
  * @return Zero on success, non-zero on error.
  */
-int guac_protocol_send_file(guac_socket* socket, int index, const char* mimetype, const char* name);
+int guac_protocol_send_file(guac_socket* socket, const guac_stream* stream,
+        const char* mimetype, const char* name);
+
+/**
+ * Sends a pipe instruction over the given guac_socket connection.
+ *
+ * If an error occurs sending the instruction, a non-zero value is
+ * returned, and guac_error is set appropriately.
+ *
+ * @param socket The guac_socket connection to use.
+ * @param stream The stream to use.
+ * @param mimetype The mimetype of the data being sent.
+ * @param name An arbitrary name uniquely identifying this pipe.
+ * @return Zero on success, non-zero on error.
+ */
+int guac_protocol_send_pipe(guac_socket* socket, const guac_stream* stream,
+        const char* mimetype, const char* name);
 
 /**
  * Writes a block of data to the currently in-progress blob which was already
@@ -376,13 +477,14 @@ int guac_protocol_send_file(guac_socket* socket, int index, const char* mimetype
  * returned, and guac_error is set appropriately.
  *
  * @param socket The guac_socket connection to use.
- * @param index The index of the blob to append data to.
+ * @param stream The stream to use.
  * @param data The file data to write.
  * @param count The number of bytes within the given buffer of file data
  *              that must be written.
  * @return Zero on success, non-zero on error.
  */
-int guac_protocol_send_blob(guac_socket* socket, int index, void* data, int count);
+int guac_protocol_send_blob(guac_socket* socket, const guac_stream* stream,
+        void* data, int count);
 
 /**
  * Sends an end instruction over the given guac_socket connection.
@@ -391,10 +493,10 @@ int guac_protocol_send_blob(guac_socket* socket, int index, void* data, int coun
  * returned, and guac_error is set appropriately.
  *
  * @param socket The guac_socket connection to use.
- * @param index The index of the blob which is now complete.
+ * @param stream The stream to use.
  * @return Zero on success, non-zero on error.
  */
-int guac_protocol_send_end(guac_socket* socket, int index);
+int guac_protocol_send_end(guac_socket* socket, const guac_stream* stream);
 
 /**
  * Sends a video instruction over the given guac_socket connection.
@@ -403,78 +505,14 @@ int guac_protocol_send_end(guac_socket* socket, int index);
  * returned, and guac_error is set appropriately.
  *
  * @param socket The guac_socket connection to use.
+ * @param stream The stream to use.
  * @param layer The destination layer.
  * @param mimetype The mimetype of the data being sent.
  * @param duration The duration of the video being sent, in milliseconds.
- * @param data The video data to be sent.
- * @param size The number of bytes of video data to send.
  * @return Zero on success, non-zero on error.
  */
-int guac_protocol_send_video(guac_socket* socket, const guac_layer* layer,
-        const char* mimetype, double duration, void* data, int size);
-
-/**
- * Begins a video instruction over the given guac_socket connection. Only the
- * initial non-data part of the instruction and the length of the data part
- * of the instruction are sent. The actual contents of the data must be
- * sent with guac_protocol_send_video_data(), and the instruction must be
- * completed with guac_protocol_send_video_end().
- *
- * Note that the size of the video to be sent MUST be known ahead of time,
- * even though the data of the video may be sent in chunks.
- *
- * No further instruction data may be sent along the givven guac_socket
- * except via guac_protocol_send_video_data() until the video instruction
- * is completed with guac_protocol_send_video_end().
- *
- * Note that if you send this instruction over a threadsafe socket, you
- * MUST also call guac_protocol_send_video_end() or the socket will be
- * left in an unsafe state.
- *
- * If an error occurs sending the instruction, a non-zero value is
- * returned, and guac_error is set appropriately.
- *
- * @param socket The guac_socket connection to use.
- * @param layer The destination layer.
- * @param mimetype The mimetype of the data being sent.
- * @param duration The duration of the video being sent, in milliseconds.
- * @param size The number of bytes of video data to send.
- * @return Zero on success, non-zero on error.
- */
-int guac_protocol_send_video_header(guac_socket* socket,
-        const guac_layer* layer, const char* mimetype, double duration, int size);
-
-/**
- * Writes a block of video data to the currently in-progress video instruction
- * which was started with guac_protocol_send_video_header(). Exactly the
- * number of requested bytes are written unless an error occurs. This function
- * may be called multiple times per video instruction for each chunk of video
- * data being written, allowing the potentially huge video instruction to be
- * split across multiple writes.
- *
- * If an error occurs sending the instruction, a non-zero value is
- * returned, and guac_error is set appropriately.
- *
- * @param socket The guac_socket connection to use.
- * @param data The video data to write.
- * @param count The number of bytes within the given buffer of video data
- *              that must be written.
- * @return Zero on success, non-zero on error.
- */
-int guac_protocol_send_video_data(guac_socket* socket, void* data, int count);
-
-/**
- * Completes the video instruction which was started with
- * guac_protocol_send_video_header(), and whose data has been written with
- * guac_protocol_send_video_data().
- *
- * If an error occurs sending the instruction, a non-zero value is
- * returned, and guac_error is set appropriately.
- *
- * @param socket The guac_socket connection to use.
- * @return Zero on success, non-zero on error.
- */
-int guac_protocol_send_video_end(guac_socket* socket);
+int guac_protocol_send_video(guac_socket* socket, const guac_stream* stream,
+        const guac_layer* layer, const char* mimetype, double duration);
 
 /* DRAWING INSTRUCTIONS */
 
@@ -925,6 +963,15 @@ int guac_protocol_send_clipboard(guac_socket* socket, const char* data);
  * @return Zero on success, non-zero on error.
  */
 int guac_protocol_send_name(guac_socket* socket, const char* name);
+
+/**
+ * Decodes the given base64-encoded string in-place. The base64 string must
+ * be NULL-terminated.
+ *
+ * @param base64 The base64-encoded string to decode.
+ * @return The number of bytes resulting from the decode operation.
+ */
+int guac_protocol_decode_base64(char* base64);
 
 #endif
 

@@ -1,46 +1,34 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac-client-ssh.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+#include "config.h"
 
-#include <stdlib.h>
-
+#include "char_mappings.h"
 #include "common.h"
+#include "sftp.h"
 #include "terminal.h"
 #include "terminal_handlers.h"
-#include "char_mappings.h"
+
+#include <stdlib.h>
 
 /**
  * Response string sent when identification is requested.
@@ -406,7 +394,6 @@ static bool* __guac_terminal_get_flag(guac_terminal* term, int num, char private
             case 20: return &(term->automatic_carriage_return); /* LF/NL */
         }
     }
-
 
     /* Unknown flag */
     return NULL;
@@ -848,7 +835,6 @@ int guac_terminal_csi(guac_terminal* term, char c) {
 
                 break;
 
-
             /* Warn of unhandled codes */
             default:
                 if (c != ';') {
@@ -890,10 +876,76 @@ int guac_terminal_csi(guac_terminal* term, char c) {
 
 }
 
+int guac_terminal_guac_set_directory(guac_terminal* term, char c) {
+
+    static char filename[2048];
+    static int length = 0;
+
+    /* Stop on ECMA-48 ST (String Terminator */
+    if (c == 0x9C || c == 0x5C || c == 0x07) {
+        filename[length++] = '\0';
+        term->char_handler = guac_terminal_echo;
+        guac_sftp_set_upload_path(term->client, filename);
+        length = 0;
+    }
+
+    /* Otherwise, store character */
+    else if (length < sizeof(filename)-1)
+        filename[length++] = c;
+
+    return 0;
+
+}
+
+int guac_terminal_guac_download(guac_terminal* term, char c) {
+
+    static char filename[2048];
+    static int length = 0;
+
+    /* Stop on ECMA-48 ST (String Terminator */
+    if (c == 0x9C || c == 0x5C || c == 0x07) {
+        filename[length++] = '\0';
+        term->char_handler = guac_terminal_echo;
+        guac_sftp_download_file(term->client, filename);
+        length = 0;
+    }
+
+    /* Otherwise, store character */
+    else if (length < sizeof(filename)-1)
+        filename[length++] = c;
+
+    return 0;
+
+}
+
 int guac_terminal_osc(guac_terminal* term, char c) {
-    /* TODO: Implement OSC */
-    if (c == 0x9C || c == 0x5C || c == 0x07) /* ECMA-48 ST (String Terminator */
-       term->char_handler = guac_terminal_echo; 
+
+    static int operation = 0;
+
+    /* If digit, append to operation */
+    if (c >= '0' && c <= '9')
+        operation = operation * 10 + c - '0';
+
+    /* If end of parameter, check value */
+    else if (c == ';') {
+
+        /* Download OSC */
+        if (operation == 482200)
+            term->char_handler = guac_terminal_guac_download;
+
+        /* Set upload directory OSC */
+        else if (operation == 482201)
+            term->char_handler = guac_terminal_guac_set_directory;
+
+        /* Reset parameter for next OSC */
+        operation = 0;
+
+    }
+
+    /* Stop on ECMA-48 ST (String Terminator */
+    else if (c == 0x9C || c == 0x5C || c == 0x07)
+        term->char_handler = guac_terminal_echo;
+
     return 0;
 }
 

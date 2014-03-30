@@ -1,50 +1,38 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac-client-rdp.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
 
 #ifndef __GUAC_RDPDR_MESSAGES_H
 #define __GUAC_RDPDR_MESSAGES_H
+
+#include "config.h"
+
+#include "rdpdr_service.h"
 
 #ifdef ENABLE_WINPR
 #include <winpr/stream.h>
 #else
 #include "compat/winpr-stream.h"
 #endif
-
-#include "rdpdr_service.h"
 
 /**
  * Identifies the "core" component of RDPDR as the destination of the received
@@ -95,6 +83,18 @@
 #define GUAC_PRINTER_NAME          "G\0u\0a\0c\0a\0m\0o\0l\0e\0\0\0"
 #define GUAC_PRINTER_NAME_LENGTH   20
 
+/**
+ * Name of the filesystem.
+ */
+#define GUAC_FILESYSTEM_NAME          "G\0u\0a\0c\0a\0m\0o\0l\0e\0\0\0"
+#define GUAC_FILESYSTEM_NAME_LENGTH   20
+
+/**
+ * Label of the filesystem.
+ */
+#define GUAC_FILESYSTEM_LABEL          "G\0U\0A\0C\0F\0I\0L\0E\0"
+#define GUAC_FILESYSTEM_LABEL_LENGTH   16
+
 /*
  * Capability types
  */
@@ -117,6 +117,12 @@
  */
 
 #define PRINT_CAPABILITY_VERSION_01   1
+
+/*
+ * Drive capability header versions.
+ */
+#define DRIVE_CAPABILITY_VERSION_01   1
+#define DRIVE_CAPABILITY_VERSION_02   2
 
 /*
  * Legal client major version numbers.
@@ -179,6 +185,37 @@
 
 #define IRP_MN_QUERY_DIRECTORY         0x00000001
 #define IRP_MN_NOTIFY_CHANGE_DIRECTORY 0x00000002
+
+/*
+ * Volume information constants.
+ */
+
+#define FileFsVolumeInformation    0x00000001
+#define FileFsSizeInformation      0x00000003
+#define FileFsDeviceInformation    0x00000004 
+#define FileFsAttributeInformation 0x00000005 
+#define FileFsFullSizeInformation  0x00000007 
+
+/*
+ * File information constants.
+ */
+
+#define FileBasicInformation        0x00000004
+#define FileStandardInformation     0x00000005
+#define FileRenameInformation       0x0000000A
+#define FileDispositionInformation  0x0000000D
+#define FileAllocationInformation   0x00000013
+#define FileEndOfFileInformation    0x00000014
+#define FileAttributeTagInformation 0x00000023 
+
+/*
+ * Directory information constants.
+ */
+
+#define FileDirectoryInformation     0x00000001
+#define FileFullDirectoryInformation 0x00000002
+#define FileBothDirectoryInformation 0x00000003
+#define FileNamesInformation         0x0000000C
 
 /*
  * Message handlers.

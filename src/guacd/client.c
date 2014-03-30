@@ -1,52 +1,39 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is guacd.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2010
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
-
-#include <stdlib.h>
-#include <time.h>
-#include <pthread.h>
-
-#include <guacamole/socket.h>
-#include <guacamole/client.h>
-#include <guacamole/error.h>
-#include <guacamole/protocol.h>
-#include <guacamole/timestamp.h>
+#include "config.h"
 
 #include "client.h"
 #include "log.h"
+
+#include <pthread.h>
+#include <stdlib.h>
+#include <time.h>
+
+#include <guacamole/client.h>
+#include <guacamole/error.h>
+#include <guacamole/protocol.h>
+#include <guacamole/socket.h>
+#include <guacamole/timestamp.h>
 
 /**
  * Sleep for the given number of milliseconds.
@@ -69,35 +56,8 @@ void* __guacd_client_output_thread(void* data) {
     guac_client* client = (guac_client*) data;
     guac_socket* socket = client->socket;
 
-    guac_timestamp last_ping_timestamp = guac_timestamp_current();
-
     /* Guacamole client output loop */
     while (client->state == GUAC_CLIENT_RUNNING) {
-
-        /* Occasionally ping client with repeat of last sync */
-        guac_timestamp timestamp = guac_timestamp_current();
-        if (timestamp - last_ping_timestamp > GUACD_SYNC_FREQUENCY) {
-
-            /* Record time of last synnc */
-            last_ping_timestamp = timestamp;
-
-            /* Send sync */
-            if (guac_protocol_send_sync(socket, client->last_sent_timestamp)) {
-                guacd_client_log_guac_error(client,
-                        "Error sending \"sync\" instruction");
-                guac_client_stop(client);
-                return NULL;
-            }
-
-            /* Flush */
-            if (guac_socket_flush(socket)) {
-                guacd_client_log_guac_error(client,
-                        "Error flushing output");
-                guac_client_stop(client);
-                return NULL;
-            }
-
-        }
 
         /* Handle server messages */
         if (client->handle_messages) {
@@ -164,9 +124,15 @@ void* __guacd_client_input_thread(void* data) {
 
         /* Stop on error */
         if (instruction == NULL) {
-            guacd_client_log_guac_error(client,
-                    "Error reading instruction");
-            guac_client_stop(client);
+
+            if (guac_error == GUAC_STATUS_INPUT_TIMEOUT)
+                guac_client_abort(client, GUAC_PROTOCOL_STATUS_CLIENT_TIMEOUT, "Client is not responding.");
+
+            else {
+                guacd_client_log_guac_error(client, "Error reading instruction");
+                guac_client_stop(client);
+            }
+
             return NULL;
         }
 

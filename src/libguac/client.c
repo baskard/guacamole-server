@@ -1,43 +1,26 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2010
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "config.h"
 
 #include "client.h"
 #include "client-handlers.h"
@@ -48,6 +31,10 @@
 #include "protocol.h"
 #include "socket.h"
 #include "time.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 guac_layer __GUAC_DEFAULT_LAYER = {
     .index = 0
@@ -97,15 +84,20 @@ void guac_client_free_layer(guac_client* client, guac_layer* layer) {
 
 guac_stream* guac_client_alloc_stream(guac_client* client) {
 
-    /* Init new stream */
-    guac_stream* allocd_stream = malloc(sizeof(guac_stream));
-    allocd_stream->index = guac_pool_next_int(client->__stream_pool);
+    guac_stream* allocd_stream;
+    int stream_index;
 
-    /* Nest socket */
-    allocd_stream->socket = guac_socket_nest(
-        client->socket,
-        allocd_stream->index
-    );
+    /* Refuse to allocate beyond maximum */
+    if (client->__stream_pool->active == GUAC_CLIENT_MAX_STREAMS)
+        return NULL;
+
+    /* Allocate stream */
+    stream_index = guac_pool_next_int(client->__stream_pool);
+
+    /* Initialize stream */
+    allocd_stream = &(client->__output_streams[stream_index]);
+    allocd_stream->index = stream_index;
+    allocd_stream->data = NULL;
 
     return allocd_stream;
 
@@ -114,17 +106,16 @@ guac_stream* guac_client_alloc_stream(guac_client* client) {
 void guac_client_free_stream(guac_client* client, guac_stream* stream) {
 
     /* Release index to pool */
-    guac_pool_free_int(client->__stream_pool, stream->index - 1);
-    
-    /* Release socket */
-    guac_socket_free(stream->socket);
+    guac_pool_free_int(client->__stream_pool, stream->index);
 
-    /* Free stream */
-    free(stream);
+    /* Mark stream as closed */
+    stream->index = GUAC_CLIENT_CLOSED_STREAM_INDEX;
 
 }
 
 guac_client* guac_client_alloc() {
+
+    int i;
 
     /* Allocate new client */
     guac_client* client = malloc(sizeof(guac_client));
@@ -148,6 +139,12 @@ guac_client* guac_client_alloc() {
 
     /* Allocate stream pool */
     client->__stream_pool = guac_pool_alloc(0);
+
+    /* Initialze streams */
+    for (i=0; i<GUAC_CLIENT_MAX_STREAMS; i++) {
+        client->__input_streams[i].index = GUAC_CLIENT_CLOSED_STREAM_INDEX;
+        client->__output_streams[i].index = GUAC_CLIENT_CLOSED_STREAM_INDEX;
+    }
 
     return client;
 
@@ -232,5 +229,37 @@ void guac_client_log_error(guac_client* client, const char* format, ...) {
 
 void guac_client_stop(guac_client* client) {
     client->state = GUAC_CLIENT_STOPPING;
+}
+
+void vguac_client_abort(guac_client* client, guac_protocol_status status,
+        const char* format, va_list ap) {
+
+    /* Only relevant if client is running */
+    if (client->state == GUAC_CLIENT_RUNNING) {
+
+        /* Log detail of error */
+        vguac_client_log_error(client, format, ap);
+
+        /* Send error immediately, limit information given */
+        guac_protocol_send_error(client->socket, "Aborted. See logs.", status);
+        guac_socket_flush(client->socket);
+
+        /* Stop client */
+        guac_client_stop(client);
+
+    }
+
+}
+
+void guac_client_abort(guac_client* client, guac_protocol_status status,
+        const char* format, ...) {
+
+    va_list args;
+    va_start(args, format);
+
+    vguac_client_abort(client, status, format, args);
+
+    va_end(args);
+
 }
 

@@ -1,55 +1,43 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac-client-rdp.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
 
 #ifndef _GUAC_RDP_CLIENT_H
 #define _GUAC_RDP_CLIENT_H
 
+#include "config.h"
+
+#include "guac_list.h"
+#include "rdp_fs.h"
+#include "rdp_keymap.h"
+#include "rdp_settings.h"
+
 #include <pthread.h>
 
 #include <cairo/cairo.h>
-
 #include <freerdp/freerdp.h>
 #include <freerdp/codec/color.h>
-
+#include <guacamole/audio.h>
 #include <guacamole/client.h>
-
-#include "audio.h"
-#include "rdp_keymap.h"
-#include "rdp_settings.h"
 
 /**
  * The maximum duration of a frame in milliseconds.
@@ -62,6 +50,25 @@
  * frame will be considered finished.
  */
 #define GUAC_RDP_FRAME_TIMEOUT 0
+
+/**
+ * The native resolution of most RDP connections. As Windows and other systems
+ * rely heavily on forced 96 DPI, we must assume 96 DPI.
+ */
+#define GUAC_RDP_NATIVE_RESOLUTION 96
+
+/**
+ * The resolution of an RDP connection that would be considered high, but is
+ * tolerable in the case that the client display would be unreasonably small
+ * otherwise.
+ */
+#define GUAC_RDP_HIGH_RESOLUTION 120
+
+/**
+ * The smallest area, in pixels^2, that would be considered reasonable large
+ * screen DPI needs to be adjusted.
+ */
+#define GUAC_RDP_REASONABLE_AREA (800*600)
 
 /**
  * Client data that will remain accessible through the guac_client.
@@ -166,13 +173,26 @@ typedef struct rdp_guac_client_data {
     /**
      * Audio output, if any.
      */
-    audio_stream* audio;
+    guac_audio_stream* audio;
+
+    /**
+     * The filesystem being shared, if any.
+     */
+    guac_rdp_fs* filesystem;
+
+    /**
+     * List of all available static virtual channels.
+     */
+    guac_common_list* available_svc;
 
     /**
      * Lock which is locked and unlocked for each RDP message.
      */
     pthread_mutex_t rdp_lock;
 
+    /**
+     * Common attributes for locks.
+     */
     pthread_mutexattr_t attributes;
 
 } rdp_guac_client_data;

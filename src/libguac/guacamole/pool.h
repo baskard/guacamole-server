@@ -1,39 +1,25 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2010
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
 
 #ifndef _GUAC_POOL_H
 #define _GUAC_POOL_H
@@ -61,6 +47,11 @@ typedef struct guac_pool {
      * allowed to be returned.
      */
     int min_size;
+
+    /**
+     * The number of integers currently in use.
+     */
+    int active;
 
     /**
      * The next integer to be released (after no more integers remain in the
@@ -102,8 +93,8 @@ struct guac_pool_int {
  * Allocates a new guac_pool having the given minimum size.
  *
  * @param size The minimum number of integers which must have been returned by
- *             guac_pool_next_int before freed integers (previously used integers)
- *             are allowed to be returned.
+ *             guac_pool_next_int before freed integers (previously used
+ *             integers) are allowed to be returned.
  * @return A new, empty guac_pool, having the given minimum size.
  */
 guac_pool* guac_pool_alloc(int size);
@@ -116,23 +107,23 @@ guac_pool* guac_pool_alloc(int size);
 void guac_pool_free(guac_pool* pool);
 
 /**
- * Returns the next available integer from the given guac_pool. All integers returned are
- * non-negative, and are returned in sequences, starting from 0.
+ * Returns the next available integer from the given guac_pool. All integers
+ * returned are non-negative, and are returned in sequences, starting from 0.
  *
  * @param pool The guac_pool to retrieve an integer from.
- * @return The next available integer, which may be either an integer not yet returned
- *         by a call to guac_pool_next_int, or an integer which was previosly returned,
- *         but has since been freed.
+ * @return The next available integer, which may be either an integer not yet
+ *         returned by a call to guac_pool_next_int, or an integer which was
+ *         previosly returned, but has since been freed.
  */
 int guac_pool_next_int(guac_pool* pool);
 
 /**
- * Frees the given integer back into the given guac_pool. The integer given will be
- * available for future calls to guac_pool_next_int.
+ * Frees the given integer back into the given guac_pool. The integer given
+ * will be available for future calls to guac_pool_next_int.
  *
  * @param pool The guac_pool to free the given integer into.
- * @param value The integer which should be readded to the given pool, such that it can
- *              be received by a future call to guac_pool_next_int.
+ * @param value The integer which should be returned to the given pool, such
+ *              that it can be received by a future call to guac_pool_next_int.
  */
 void guac_pool_free_int(guac_pool* pool, int value);
 

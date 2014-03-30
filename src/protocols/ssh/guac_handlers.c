@@ -1,65 +1,47 @@
-
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+/*
+ * Copyright (C) 2013 Glyptodon LLC
  *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
  *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
- * The Original Code is libguac-client-ssh.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- * James Muehlner <dagger10k@users.sourceforge.net>
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-#include <sys/select.h>
+#include "config.h"
 
-#include <stdlib.h>
-#include <string.h>
-
-#include <cairo/cairo.h>
-#include <pango/pangocairo.h>
-
-#include <guacamole/socket.h>
-#include <guacamole/protocol.h>
-#include <guacamole/client.h>
-#include <guacamole/error.h>
-
-#include <libssh/libssh.h>
-#include "libssh_compat.h"
-
-#include "guac_handlers.h"
 #include "client.h"
 #include "common.h"
 #include "cursor.h"
+#include "guac_handlers.h"
+
+#include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/select.h>
+#include <sys/stat.h>
+
+#include <cairo/cairo.h>
+#include <guacamole/socket.h>
+#include <guacamole/protocol.h>
+#include <guacamole/client.h>
+#include <libssh2.h>
+#include <pango/pangocairo.h>
 
 int ssh_guac_client_handle_messages(guac_client* client) {
 
-    guac_socket* socket = client->socket;
     ssh_guac_client_data* client_data = (ssh_guac_client_data*) client->data;
     char buffer[8192];
 
@@ -88,15 +70,16 @@ int ssh_guac_client_handle_messages(guac_client* client) {
         /* Read data, write to terminal */
         if ((bytes_read = read(fd, buffer, sizeof(buffer))) > 0) {
 
-            if (guac_terminal_write(client_data->term, buffer, bytes_read))
+            if (guac_terminal_write(client_data->term, buffer, bytes_read)) {
+                guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "Error writing data");
                 return 1;
+            }
 
         }
 
         /* Notify on error */
         if (bytes_read < 0) {
-            guac_protocol_send_error(socket, "Error reading data.");
-            guac_socket_flush(socket);
+            guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "Error reading data");
             return 1;
         }
 
@@ -111,8 +94,7 @@ int ssh_guac_client_handle_messages(guac_client* client) {
 
     }
     else if (ret_val < 0) {
-        guac_error_message = "Error waiting for pipe";
-        guac_error = GUAC_STATUS_SEE_ERRNO;
+        guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "Error waiting for data");
         return 1;
     }
 
@@ -130,8 +112,6 @@ int ssh_guac_client_clipboard_handler(guac_client* client, char* data) {
 
     return 0;
 }
-
-
 
 int ssh_guac_client_mouse_handler(guac_client* client, int x, int y, int mask) {
 
@@ -395,7 +375,7 @@ int ssh_guac_client_size_handler(guac_client* client, int width, int height) {
 
         /* Update SSH pty size if connected */
         if (guac_client_data->term_channel != NULL)
-            channel_change_pty_size(guac_client_data->term_channel,
+            libssh2_channel_request_pty_size(guac_client_data->term_channel,
                     terminal->term_width, terminal->term_height);
 
         /* Reset scroll region */
@@ -418,8 +398,8 @@ int ssh_guac_client_free_handler(guac_client* client) {
 
     /* Close SSH channel */
     if (guac_client_data->term_channel != NULL) {
-        ssh_channel_close(guac_client_data->term_channel);
-        ssh_channel_send_eof(guac_client_data->term_channel);
+        libssh2_channel_send_eof(guac_client_data->term_channel);
+        libssh2_channel_close(guac_client_data->term_channel);
     }
 
     /* Free terminal */
@@ -427,10 +407,24 @@ int ssh_guac_client_free_handler(guac_client* client) {
     pthread_join(guac_client_data->client_thread, NULL);
 
     /* Free channels */
-    ssh_channel_free(guac_client_data->term_channel);
+    libssh2_channel_free(guac_client_data->term_channel);
+
+    /* Clean up SFTP */
+    if (guac_client_data->sftp_session)
+        libssh2_sftp_shutdown(guac_client_data->sftp_session);
+
+    if (guac_client_data->sftp_ssh_session) {
+        libssh2_session_disconnect(guac_client_data->sftp_ssh_session, "Bye");
+        libssh2_session_free(guac_client_data->sftp_ssh_session);
+    }
 
     /* Free session */
-    ssh_free(guac_client_data->session);
+    if (guac_client_data->session != NULL)
+        libssh2_session_free(guac_client_data->session);
+
+    /* Free auth key */
+    if (guac_client_data->key != NULL)
+        ssh_key_free(guac_client_data->key);
 
     /* Free clipboard data */
     free(guac_client_data->clipboard_data);

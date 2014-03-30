@@ -1,46 +1,33 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2010
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
-
-#include <stdlib.h>
-#include <stdio.h>
+#include "config.h"
 
 #include "client.h"
-#include "protocol.h"
 #include "client-handlers.h"
+#include "protocol.h"
+
+#include <stdio.h>
+#include <stdlib.h>
 
 /* Guacamole instruction handler map */
 
@@ -51,6 +38,11 @@ __guac_instruction_handler_mapping __guac_instruction_handler_map[] = {
    {"clipboard",  __guac_handle_clipboard},
    {"disconnect", __guac_handle_disconnect},
    {"size",       __guac_handle_size},
+   {"file",       __guac_handle_file},
+   {"pipe",       __guac_handle_pipe},
+   {"ack",        __guac_handle_ack},
+   {"blob",       __guac_handle_blob},
+   {"end",        __guac_handle_end},
    {NULL,         NULL}
 };
 
@@ -71,7 +63,6 @@ int64_t __guac_parse_int(const char* str) {
     return num * sign;
 
 }
-
 
 /* Guacamole instruction handlers */
 
@@ -124,6 +115,176 @@ int __guac_handle_size(guac_client* client, guac_instruction* instruction) {
             atoi(instruction->argv[1])  /* height */
         );
     return 0;
+}
+
+int __guac_handle_file(guac_client* client, guac_instruction* instruction) {
+
+    /* Pull corresponding stream */
+    int stream_index = atoi(instruction->argv[0]);
+    guac_stream* stream;
+
+    /* Validate stream index */
+    if (stream_index < 0 || stream_index >= GUAC_CLIENT_MAX_STREAMS) {
+
+        guac_stream dummy_stream;
+        dummy_stream.index = stream_index;
+
+        guac_protocol_send_ack(client->socket, &dummy_stream,
+                "Invalid stream index", GUAC_PROTOCOL_STATUS_CLIENT_BAD_REQUEST);
+        return 0;
+    }
+
+    /* Initialize stream */
+    stream = &(client->__input_streams[stream_index]);
+    stream->index = stream_index;
+    stream->data = NULL;
+
+    /* If supported, call handler */
+    if (client->file_handler)
+        return client->file_handler(
+            client,
+            stream,
+            instruction->argv[1], /* mimetype */
+            instruction->argv[2]  /* filename */
+        );
+
+    /* Otherwise, abort */
+    guac_protocol_send_ack(client->socket, stream,
+            "File transfer unsupported", GUAC_PROTOCOL_STATUS_UNSUPPORTED);
+    return 0;
+}
+
+int __guac_handle_pipe(guac_client* client, guac_instruction* instruction) {
+
+    /* Pull corresponding stream */
+    int stream_index = atoi(instruction->argv[0]);
+    guac_stream* stream;
+
+    /* Validate stream index */
+    if (stream_index < 0 || stream_index >= GUAC_CLIENT_MAX_STREAMS) {
+
+        guac_stream dummy_stream;
+        dummy_stream.index = stream_index;
+
+        guac_protocol_send_ack(client->socket, &dummy_stream,
+                "Invalid stream index", GUAC_PROTOCOL_STATUS_CLIENT_BAD_REQUEST);
+        return 0;
+    }
+
+    /* Initialize stream */
+    stream = &(client->__input_streams[stream_index]);
+    stream->index = stream_index;
+    stream->data = NULL;
+
+    /* If supported, call handler */
+    if (client->pipe_handler)
+        return client->pipe_handler(
+            client,
+            stream,
+            instruction->argv[1], /* mimetype */
+            instruction->argv[2]  /* name */
+        );
+
+    /* Otherwise, abort */
+    guac_protocol_send_ack(client->socket, stream,
+            "Named pipes unsupported", GUAC_PROTOCOL_STATUS_UNSUPPORTED);
+    return 0;
+}
+
+int __guac_handle_ack(guac_client* client, guac_instruction* instruction) {
+
+    guac_stream* stream;
+
+    /* Validate stream index */
+    int stream_index = atoi(instruction->argv[0]);
+    if (stream_index < 0 || stream_index >= GUAC_CLIENT_MAX_STREAMS)
+        return 0;
+
+    stream = &(client->__output_streams[stream_index]);
+
+    /* Validate initialization of stream */
+    if (stream->index == GUAC_CLIENT_CLOSED_STREAM_INDEX)
+        return 0;
+
+    /* If handler defined, call it */
+    if (client->ack_handler)
+        return client->ack_handler(client, stream, instruction->argv[1],
+                atoi(instruction->argv[2]));
+
+    return 0;
+}
+
+int __guac_handle_blob(guac_client* client, guac_instruction* instruction) {
+
+    guac_stream* stream;
+
+    /* Validate stream index */
+    int stream_index = atoi(instruction->argv[0]);
+    if (stream_index < 0 || stream_index >= GUAC_CLIENT_MAX_STREAMS) {
+
+        guac_stream dummy_stream;
+        dummy_stream.index = stream_index;
+
+        guac_protocol_send_ack(client->socket, &dummy_stream,
+                "Invalid stream index", GUAC_PROTOCOL_STATUS_CLIENT_BAD_REQUEST);
+        return 0;
+    }
+
+    stream = &(client->__input_streams[stream_index]);
+
+    /* Validate initialization of stream */
+    if (stream->index == GUAC_CLIENT_CLOSED_STREAM_INDEX) {
+
+        guac_stream dummy_stream;
+        dummy_stream.index = stream_index;
+
+        guac_protocol_send_ack(client->socket, &dummy_stream,
+                "Invalid stream index", GUAC_PROTOCOL_STATUS_CLIENT_BAD_REQUEST);
+        return 0;
+    }
+
+    if (client->blob_handler) {
+
+        /* Decode base64 */
+        int length = guac_protocol_decode_base64(instruction->argv[1]);
+        return client->blob_handler(client, stream, instruction->argv[1],
+            length);
+
+    }
+
+    guac_protocol_send_ack(client->socket, stream,
+            "File transfer unsupported", GUAC_PROTOCOL_STATUS_UNSUPPORTED);
+    return 0;
+}
+
+int __guac_handle_end(guac_client* client, guac_instruction* instruction) {
+
+    guac_stream* stream;
+    int result = 0;
+
+    /* Pull corresponding stream */
+    int stream_index = atoi(instruction->argv[0]);
+
+    /* Validate stream index */
+    if (stream_index < 0 || stream_index >= GUAC_CLIENT_MAX_STREAMS) {
+
+        guac_stream dummy_stream;
+        dummy_stream.index = stream_index;
+
+        guac_protocol_send_ack(client->socket, &dummy_stream,
+                "Invalid stream index",
+                GUAC_PROTOCOL_STATUS_CLIENT_BAD_REQUEST);
+        return 0;
+    }
+
+    stream = &(client->__input_streams[stream_index]);
+
+    if (client->end_handler)
+        result = client->end_handler(client, stream);
+
+    /* Mark stream as closed */
+    stream->index = GUAC_CLIENT_CLOSED_STREAM_INDEX;
+    return result;
 }
 
 int __guac_handle_disconnect(guac_client* client, guac_instruction* instruction) {

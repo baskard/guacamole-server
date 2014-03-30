@@ -1,61 +1,46 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac-client-ssh.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- * James Muehlner <dagger10k@users.sourceforge.net>
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
+#include "config.h"
 
+#include "blank.h"
+#include "client.h"
+#include "guac_handlers.h"
+#include "ibar.h"
+#include "ssh_client.h"
+#include "terminal.h"
+
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <pthread.h>
 
-#include <guacamole/socket.h>
-#include <guacamole/protocol.h>
 #include <guacamole/client.h>
-#include <guacamole/error.h>
-
-#include "client.h"
-#include "guac_handlers.h"
-#include "terminal.h"
-#include "blank.h"
-#include "ibar.h"
-#include "ssh_client.h"
+#include <guacamole/protocol.h>
+#include <guacamole/socket.h>
 
 #define GUAC_SSH_DEFAULT_FONT_NAME "monospace" 
 #define GUAC_SSH_DEFAULT_FONT_SIZE 12
-#define GUAC_SSH_DEFAULT_PORT      22
+#define GUAC_SSH_DEFAULT_PORT      "22"
 
 /* Client plugin arguments */
 const char* GUAC_CLIENT_ARGS[] = {
@@ -65,6 +50,12 @@ const char* GUAC_CLIENT_ARGS[] = {
     "password",
     "font-name",
     "font-size",
+    "enable-sftp",
+    "private-key",
+    "passphrase",
+#ifdef ENABLE_SSH_AGENT
+    "enable-agent",
+#endif
     NULL
 };
 
@@ -100,6 +91,28 @@ enum __SSH_ARGS_IDX {
      */
     IDX_FONT_SIZE,
 
+    /**
+     * Whether SFTP should be enabled.
+     */
+    IDX_ENABLE_SFTP,
+
+    /**
+     * The private key to use for authentication, if any.
+     */
+    IDX_PRIVATE_KEY,
+
+    /**
+     * The passphrase required to decrypt the private key, if any.
+     */
+    IDX_PASSPHRASE,
+
+#ifdef ENABLE_SSH_AGENT
+    /**
+     * Whether SSH agent forwarding support should be enabled.
+     */
+    IDX_ENABLE_AGENT,
+#endif
+
     SSH_ARGS_COUNT
 };
 
@@ -118,7 +131,7 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
     client_data->term_channel = NULL;
 
     if (argc != SSH_ARGS_COUNT) {
-        guac_client_log_error(client, "Wrong number of arguments");
+        guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "Wrong number of arguments");
         return -1;
     }
 
@@ -126,6 +139,11 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
     strcpy(client_data->hostname,  argv[IDX_HOSTNAME]);
     strcpy(client_data->username,  argv[IDX_USERNAME]);
     strcpy(client_data->password,  argv[IDX_PASSWORD]);
+
+    /* Init public key auth information */
+    client_data->key = NULL;
+    strcpy(client_data->key_base64,     argv[IDX_PRIVATE_KEY]);
+    strcpy(client_data->key_passphrase, argv[IDX_PASSPHRASE]);
 
     /* Read font name */
     if (argv[IDX_FONT_NAME][0] != 0)
@@ -139,21 +157,31 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
     else
         client_data->font_size = GUAC_SSH_DEFAULT_FONT_SIZE;
 
+    /* Parse SFTP enable */
+    client_data->enable_sftp = strcmp(argv[IDX_ENABLE_SFTP], "true") == 0;
+    client_data->sftp_session = NULL;
+    client_data->sftp_ssh_session = NULL;
+    strcpy(client_data->sftp_upload_path, ".");
+
+#ifdef ENABLE_SSH_AGENT
+    client_data->enable_agent = strcmp(argv[IDX_ENABLE_AGENT], "true") == 0;
+#endif
+
     /* Read port */
     if (argv[IDX_PORT][0] != 0)
-        client_data->port = atoi(argv[IDX_PORT]);
+        strcpy(client_data->port, argv[IDX_PORT]);
     else
-        client_data->port = GUAC_SSH_DEFAULT_PORT;
+        strcpy(client_data->port, GUAC_SSH_DEFAULT_PORT);
 
     /* Create terminal */
     client_data->term = guac_terminal_create(client,
             client_data->font_name, client_data->font_size,
+            client->info.optimal_resolution,
             client->info.optimal_width, client->info.optimal_height);
 
     /* Fail if terminal init failed */
     if (client_data->term == NULL) {
-        guac_error = GUAC_STATUS_BAD_STATE;
-        guac_error_message = "Terminal initialization failed";
+        guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "Terminal initialization failed");
         return -1;
     }
 
@@ -182,7 +210,7 @@ int guac_client_init(guac_client* client, int argc, char** argv) {
 
     /* Start client thread */
     if (pthread_create(&(client_data->client_thread), NULL, ssh_client_thread, (void*) client)) {
-        guac_client_log_error(client, "Unable to SSH client thread");
+        guac_client_abort(client, GUAC_PROTOCOL_STATUS_SERVER_ERROR, "Unable to start SSH client thread");
         return -1;
     }
 

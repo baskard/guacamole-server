@@ -1,49 +1,44 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac-client-ssh.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- * James Muehlner <dagger10k@users.sourceforge.net>
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
 
 #ifndef _SSH_GUAC_CLIENT_H
 #define _SSH_GUAC_CLIENT_H
 
-#include <pthread.h>
-#include <libssh/libssh.h>
+#include "config.h"
 
-#include "terminal.h"
 #include "cursor.h"
+#include "sftp.h"
+#include "ssh_key.h"
+#include "terminal.h"
+
+#include <pthread.h>
+
+#include <libssh2.h>
+#include <libssh2_sftp.h>
+
+#ifdef ENABLE_SSH_AGENT
+#include "ssh_agent.h"
+#endif
 
 /**
  * SSH-specific client data.
@@ -58,7 +53,7 @@ typedef struct ssh_guac_client_data {
     /**
      * The port of the SSH server to connect to.
      */
-    int port;
+    char port[64];
 
     /**
      * The name of the user to login as.
@@ -71,6 +66,21 @@ typedef struct ssh_guac_client_data {
     char password[1024];
 
     /**
+     * The private key, encoded as base64.
+     */
+    char key_base64[4096];
+
+    /**
+     * The password to use to decrypt the given private key.
+     */
+    char key_passphrase[1024];
+
+    /**
+     * The private key to use for authentication, if any.
+     */
+    ssh_key* key;
+
+    /**
      * The name of the font to use for display rendering.
      */
     char font_name[1024];
@@ -81,6 +91,23 @@ typedef struct ssh_guac_client_data {
     int font_size;
 
     /**
+     * Whether SFTP is enabled.
+     */
+    bool enable_sftp;
+
+#ifdef ENABLE_SSH_AGENT
+    /**
+     * Whether the SSH agent is enabled.
+     */
+    bool enable_agent;
+
+    /**
+     * The current agent, if any.
+     */
+    ssh_auth_agent* auth_agent;
+#endif
+
+    /**
      * The SSH client thread.
      */
     pthread_t client_thread;
@@ -88,12 +115,27 @@ typedef struct ssh_guac_client_data {
     /**
      * SSH session, used by the SSH client thread.
      */
-    ssh_session session;
+    LIBSSH2_SESSION* session;
+
+    /**
+     * The distinct SSH session used for SFTP.
+     */
+    LIBSSH2_SESSION* sftp_ssh_session;
+
+    /**
+     * SFTP session, used for file transfers.
+     */
+    LIBSSH2_SFTP* sftp_session;
+
+    /**
+     * The path files will be sent to.
+     */
+    char sftp_upload_path[GUAC_SFTP_MAX_PATH];
 
     /**
      * SSH terminal channel, used by the SSH client thread.
      */
-    ssh_channel term_channel;
+    LIBSSH2_CHANNEL* term_channel;
 
     /**
      * The terminal which will render all output from the SSH client.

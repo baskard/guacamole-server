@@ -1,53 +1,41 @@
+/*
+ * Copyright (C) 2013 Glyptodon LLC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
 
-/* ***** BEGIN LICENSE BLOCK *****
- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
- *
- * The contents of this file are subject to the Mozilla Public License Version
- * 1.1 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.mozilla.org/MPL/
- *
- * Software distributed under the License is distributed on an "AS IS" basis,
- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
- * for the specific language governing rights and limitations under the
- * License.
- *
- * The Original Code is libguac-client-rdp.
- *
- * The Initial Developer of the Original Code is
- * Michael Jumper.
- * Portions created by the Initial Developer are Copyright (C) 2011
- * the Initial Developer. All Rights Reserved.
- *
- * Contributor(s):
- *
- * Alternatively, the contents of this file may be used under the terms of
- * either the GNU General Public License Version 2 or later (the "GPL"), or
- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
- * in which case the provisions of the GPL or the LGPL are applicable instead
- * of those above. If you wish to allow use of your version of this file only
- * under the terms of either the GPL or the LGPL, and not to allow others to
- * use your version of this file under the terms of the MPL, indicate your
- * decision by deleting the provisions above and replace them with the notice
- * and other provisions required by the GPL or the LGPL. If you do not delete
- * the provisions above, a recipient may use your version of this file under
- * the terms of any one of the MPL, the GPL or the LGPL.
- *
- * ***** END LICENSE BLOCK ***** */
 
 #ifndef _GUAC_RDP_RDP_KEYMAP_H
 #define _GUAC_RDP_RDP_KEYMAP_H
 
-#ifdef HAVE_FREERDP_LOCALE_KEYBOARD_H
-#include <freerdp/locale/keyboard.h>
-#else
-#include <freerdp/kbd/layouts.h>
-#endif
+#include "config.h"
 
 #ifdef ENABLE_WINPR
 #include <winpr/wtypes.h>
 #else
 #include "compat/winpr-wtypes.h"
+#endif
+
+#ifdef HAVE_FREERDP_LOCALE_KEYBOARD_H
+#include <freerdp/locale/keyboard.h>
+#else
+#include <freerdp/kbd/layouts.h>
 #endif
 
 /**
@@ -128,31 +116,6 @@ typedef guac_rdp_keysym_desc guac_rdp_static_keymap[0x200][0x100];
 typedef int guac_rdp_keysym_state_map[0x200][0x100];
 
 /**
- * US English keymap.
- */
-extern const guac_rdp_keymap guac_rdp_keymap_en_us;
-
-/**
- * German keymap.
- */
-extern const guac_rdp_keymap guac_rdp_keymap_de_de;
-
-/**
- * French keymap.
- */
-extern const guac_rdp_keymap guac_rdp_keymap_fr_fr;
-
-/**
- * Failsafe (Unicode events for all printable characters) keymap.
- */
-extern const guac_rdp_keymap guac_rdp_keymap_failsafe;
-
-/**
- * Common, base keymap for non-printable keys.
- */
-extern const guac_rdp_keymap guac_rdp_keymap_base;
-
-/**
  * Simple macro for determing whether a keysym can be stored (or retrieved)
  * from any keymap.
  */
@@ -169,6 +132,11 @@ extern const guac_rdp_keymap guac_rdp_keymap_base;
             [(((keysym) & 0xFF00) >> 8) | ((keysym) >> 16)]       \
             [(keysym) & 0xFF]                                     \
         )
+
+/**
+ * The name of the default keymap, which MUST exist.
+ */
+#define GUAC_DEFAULT_KEYMAP "en-us-qwerty"
 
 /**
  * Keysym string containing only the left "shift" key.
@@ -231,6 +199,11 @@ extern const int GUAC_KEYSYMS_ALL_MODIFIERS[];
  * NULL-terminated array of all keymaps.
  */
 extern const guac_rdp_keymap* GUAC_KEYMAPS[];
+
+/**
+ * Return the keymap having the given name, if any, or NULL otherwise.
+ */
+const guac_rdp_keymap* guac_rdp_keymap_find(const char* name);
 
 #endif
 
