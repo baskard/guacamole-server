@@ -1,3 +1,11 @@
+guacamole-server (0.9.0-1) unstable; urgency=low
+
+  * Merge changes from 0.9.0
+  * Switch to libssh2-1 (upstream dependency)
+  * libguac is now soversion 6
+
+ -- Michael Jumper <mike.jumper@guac-dev.org>  Sun, 30 Mar 2014 15:23:27 -0700
+
 guacamole-server (0.8.3-1) unstable; urgency=low
 
   * Merge changes from 0.8.3
